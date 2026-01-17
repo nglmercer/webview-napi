@@ -1,5 +1,5 @@
 {
-  "name": "@webviewjs/webview",
+  "name": "webview-rs",
   "version": "0.1.4",
   "bin": {
     "webview": "./cli/index.mjs",
@@ -8,9 +8,9 @@
   "description": "Robust cross-platform webview library for Node.js written in Rust. It also works with deno and bun.",
   "main": "./index.js",
   "types": "./index.d.ts",
-  "repository": "git@github.com:webviewjs/webview.git",
+  "repository": "https://github.com/nglmercer/webview-rs",
   "license": "MIT",
-  "type": "commonjs",
+  "type": "module",
   "keywords": [
     "webview",
     "node",
@@ -21,7 +21,8 @@
   "files": [
     "cli",
     "index.d.ts",
-    "index.js"
+    "index.js",
+    "*.node"
   ],
   "napi": {
     "binaryName": "webview",

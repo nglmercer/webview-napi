@@ -61,6 +61,16 @@ export declare class EventLoop {
 export declare class EventLoopBuilder {
   /** Creates a new event loop builder. */
   constructor()
+  /**
+   * Forces X11 backend on Linux.
+   * This must be called before build() to take effect.
+   */
+  withForceX11(force: boolean): this
+  /**
+   * Forces Wayland backend on Linux.
+   * This must be called before build() to take effect.
+   */
+  withForceWayland(force: boolean): this
   /** Builds the event loop. */
   build(): EventLoop
 }

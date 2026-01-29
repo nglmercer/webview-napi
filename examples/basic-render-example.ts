@@ -5,7 +5,7 @@
  * with alternating black and white frames using @webviewjs/webview
  */
 
-import { WindowBuilder, EventLoop, PixelRenderer, RenderOptions, ScaleMode } from '../index.js'
+import { WindowBuilder, EventLoopBuilder, PixelRenderer, RenderOptions, ScaleMode } from '../index.js'
 import { createLogger } from './logger.js'
 
 const logger = createLogger('BasicRender')
@@ -47,7 +47,8 @@ async function main() {
 
   try {
     logger.info('Creating event loop...')
-    const eventLoop = new EventLoop()
+    const eventLoopBuilder = new EventLoopBuilder()
+    const eventLoop = eventLoopBuilder.build()
     logger.success('Event loop created')
 
     // Window configuration
@@ -64,9 +65,9 @@ async function main() {
       .withPosition(100, 100)
       .withResizable(true)
       .withDecorated(true)
+      .withForceX11(true)
       .withVisible(true)
       .withFocused(true)
-      .withForceX11(true)
 
     const window = builder.build(eventLoop)
     logger.success('Window created', { windowId: window.id })

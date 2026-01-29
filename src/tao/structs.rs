@@ -430,6 +430,8 @@ impl EventLoop {
 #[napi]
 pub struct EventLoopBuilder {
   inner: Option<tao::event_loop::EventLoopBuilder<()>>,
+  force_x11: Option<bool>,
+  force_wayland: Option<bool>,
 }
 
 #[napi]
@@ -439,12 +441,58 @@ impl EventLoopBuilder {
   pub fn new() -> Result<Self> {
     Ok(Self {
       inner: Some(tao::event_loop::EventLoopBuilder::new()),
+      force_x11: None,
+      force_wayland: None,
     })
+  }
+
+  /// Forces X11 backend on Linux.
+  /// This must be called before build() to take effect.
+  #[napi]
+  pub fn with_force_x11(&mut self, force: bool) -> Result<&Self> {
+    self.force_x11 = Some(force);
+    Ok(self)
+  }
+
+  /// Forces Wayland backend on Linux.
+  /// This must be called before build() to take effect.
+  #[napi]
+  pub fn with_force_wayland(&mut self, force: bool) -> Result<&Self> {
+    self.force_wayland = Some(force);
+    Ok(self)
   }
 
   /// Builds the event loop.
   #[napi]
   pub fn build(&mut self) -> Result<EventLoop> {
+    // Handle backend selection BEFORE creating the event loop
+    // This ensures the environment is set up correctly before tao selects the backend
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    {
+      if self.force_x11 == Some(true) {
+        // Force X11 backend by clearing Wayland environment variables
+        std::env::remove_var("WAYLAND_DISPLAY");
+        // Ensure DISPLAY is set for X11
+        if std::env::var("DISPLAY").is_err() {
+          std::env::set_var("DISPLAY", ":0");
+        }
+        println!(
+          "Forcing X11 backend: WAYLAND_DISPLAY cleared, DISPLAY={}",
+          std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string())
+        );
+      } else if self.force_wayland == Some(true) {
+        // Force Wayland backend
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+        println!("Forcing Wayland backend: WAYLAND_DISPLAY=wayland-0");
+      }
+    }
+
     let event_loop = self
       .inner
       .take()
@@ -1060,6 +1108,11 @@ impl WindowBuilder {
       self.attributes.transparent, platform_info.display_server
     );
 
+    // Warn about positioning on Wayland
+    if platform_info.is_wayland() && (self.attributes.x.is_some() || self.attributes.y.is_some()) {
+      println!("Warning: Window positioning is not supported on Wayland, ignoring position");
+    }
+
     let mut builder = tao::window::WindowBuilder::new()
       .with_title(&self.attributes.title)
       .with_inner_size(tao::dpi::LogicalSize::new(
@@ -1090,15 +1143,8 @@ impl WindowBuilder {
         // We don't set with_rgba_visual on Wayland as it's X11-specific
       }
 
-      // Handle backend selection
-      if self.attributes.force_x11 == Some(true) {
-        // Force X11 backend
-        std::env::set_var("WAYLAND_DISPLAY", "");
-        std::env::set_var("DISPLAY", ":0");
-      } else if self.attributes.force_wayland == Some(true) {
-        // Force Wayland backend
-        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
-      }
+      // Backend selection is already handled before platform detection
+      // This block is kept for any additional platform-specific settings if needed
     }
 
     #[cfg(target_os = "macos")]

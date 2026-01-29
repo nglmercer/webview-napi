@@ -1,6 +1,7 @@
 //! Simple pixel buffer rendering module
 //!
 //! Provides a minimal API for rendering RGBA pixel buffers to Tao windows.
+//! Supports both X11 (via pixels crate) and Wayland (via softbuffer crate).
 
 use crate::tao::enums::ScaleMode;
 use crate::tao::platform;
@@ -133,11 +134,11 @@ impl PixelRenderer {
     let platform_info = platform::platform_info();
 
     if !platform_info.supports_direct_rendering {
-      // Wayland fallback: use alternative rendering approach
-      return self.render_wayland_fallback(&window_guard, &buffer, window_width, window_height);
+      // Wayland: use softbuffer for rendering
+      return self.render_wayland(&window_guard, &buffer, window_width, window_height);
     }
 
-    // Create pixels surface and renderer
+    // X11: Create pixels surface and renderer
     let surface_texture = pixels::SurfaceTexture::new(window_width, window_height, &*window_guard);
 
     let mut pixels = pixels::Pixels::new(self.buffer_width, self.buffer_height, surface_texture)
@@ -212,21 +213,123 @@ impl PixelRenderer {
     Ok(())
   }
 
-  /// Fallback rendering method for Wayland
+  /// Render using softbuffer for Wayland support
   ///
-  /// This method is not implemented and always returns an error.
-  /// Direct pixel buffer rendering is not supported on Wayland.
-  fn render_wayland_fallback(
+  /// softbuffer provides a cross-platform software rendering buffer that works
+  /// on Wayland, X11, and other platforms.
+  fn render_wayland(
     &self,
-    _window: &tao::window::Window,
-    _buffer: &[u8],
-    _window_width: u32,
-    _window_height: u32,
+    window: &tao::window::Window,
+    buffer: &[u8],
+    window_width: u32,
+    window_height: u32,
   ) -> napi::Result<()> {
-    Err(napi::Error::new(
-      napi::Status::GenericFailure,
-      "Direct pixel buffer rendering is not supported on Wayland".to_string(),
-    ))
+    use softbuffer::{Context, Surface};
+    use std::num::NonZeroU32;
+
+    // Create softbuffer context and surface
+    let context = Context::new(window).map_err(|e| {
+      napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("Failed to create softbuffer context: {:?}", e),
+      )
+    })?;
+
+    let mut surface = Surface::new(&context, window).map_err(|e| {
+      napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("Failed to create softbuffer surface: {:?}", e),
+      )
+    })?;
+
+    // Resize surface to match window
+    surface
+      .resize(
+        NonZeroU32::new(window_width).unwrap_or(NonZeroU32::new(1).unwrap()),
+        NonZeroU32::new(window_height).unwrap_or(NonZeroU32::new(1).unwrap()),
+      )
+      .map_err(|e| {
+        napi::Error::new(
+          napi::Status::GenericFailure,
+          format!("Failed to resize softbuffer surface: {:?}", e),
+        )
+      })?;
+
+    // Get the surface buffer
+    let mut surface_buffer = surface.buffer_mut().map_err(|e| {
+      napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("Failed to get softbuffer buffer: {:?}", e),
+      )
+    })?;
+
+    // Apply scaling if needed
+    let (offset_x, offset_y, scaled_width, scaled_height) = calculate_scaled_dimensions(
+      self.buffer_width,
+      self.buffer_height,
+      window_width,
+      window_height,
+      self.scale_mode,
+    );
+
+    // Clear with background color first (convert RGBA to ARGB for softbuffer)
+    let bg_argb = u32::from_le_bytes([self.bg_color[2], self.bg_color[1], self.bg_color[0], 255]);
+    for pixel in surface_buffer.iter_mut() {
+      *pixel = bg_argb;
+    }
+
+    // Copy source buffer with scaling (RGBA to ARGB conversion)
+    match self.scale_mode {
+      ScaleMode::Stretch => {
+        // Stretch to fill entire window
+        copy_buffer_stretch_softbuffer(
+          &mut surface_buffer,
+          buffer,
+          self.buffer_width,
+          self.buffer_height,
+          window_width,
+          window_height,
+        );
+      }
+      ScaleMode::None => {
+        // Center without scaling
+        copy_buffer_centered_softbuffer(
+          &mut surface_buffer,
+          buffer,
+          self.buffer_width,
+          self.buffer_height,
+          window_width,
+          window_height,
+        );
+      }
+      _ => {
+        // Fit, Fill, Integer - copy with calculated dimensions
+        copy_buffer_scaled_softbuffer(
+          &mut surface_buffer,
+          buffer,
+          CopyBufferParams {
+            buffer_width: self.buffer_width,
+            buffer_height: self.buffer_height,
+            window_width,
+            window_height,
+            offset_x,
+            offset_y,
+            scaled_width,
+            scaled_height,
+          },
+        );
+      }
+    }
+
+    // Present the buffer
+    surface_buffer.present().map_err(|e| {
+      napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("Failed to present softbuffer: {:?}", e),
+      )
+    })?;
+
+    Ok(())
   }
 }
 
@@ -354,6 +457,120 @@ fn copy_buffer_scaled(frame: &mut [u8], buffer: &[u8], params: CopyBufferParams)
 
       if src_idx + 4 <= buffer.len() && dst_idx + 4 <= frame.len() {
         frame[dst_idx..dst_idx + 4].copy_from_slice(&buffer[src_idx..src_idx + 4]);
+      }
+    }
+  }
+}
+
+/// Copies buffer with stretch scaling for softbuffer (RGBA to ARGB conversion)
+fn copy_buffer_stretch_softbuffer(
+  surface_buffer: &mut [u32],
+  buffer: &[u8],
+  buffer_width: u32,
+  buffer_height: u32,
+  window_width: u32,
+  window_height: u32,
+) {
+  let scale_x = buffer_width as f64 / window_width as f64;
+  let scale_y = buffer_height as f64 / window_height as f64;
+
+  for y in 0..window_height {
+    let src_y = (y as f64 * scale_y).min(buffer_height as f64 - 1.0) as u32;
+
+    for x in 0..window_width {
+      let src_x = (x as f64 * scale_x).min(buffer_width as f64 - 1.0) as u32;
+
+      let src_idx = ((src_y * buffer_width + src_x) * 4) as usize;
+      let dst_idx = (y * window_width + x) as usize;
+
+      if src_idx + 4 <= buffer.len() && dst_idx < surface_buffer.len() {
+        // Convert RGBA to ARGB (softbuffer uses ARGB format)
+        surface_buffer[dst_idx] = u32::from_le_bytes([
+          buffer[src_idx + 2], // B
+          buffer[src_idx + 1], // G
+          buffer[src_idx],     // R
+          255,                 // A (softbuffer doesn't use alpha, set to opaque)
+        ]);
+      }
+    }
+  }
+}
+
+/// Copies buffer centered without scaling for softbuffer (RGBA to ARGB conversion)
+fn copy_buffer_centered_softbuffer(
+  surface_buffer: &mut [u32],
+  buffer: &[u8],
+  buffer_width: u32,
+  buffer_height: u32,
+  window_width: u32,
+  window_height: u32,
+) {
+  let offset_x = ((window_width.saturating_sub(buffer_width)) / 2) as usize;
+  let offset_y = ((window_height.saturating_sub(buffer_height)) / 2) as usize;
+
+  for y in 0..buffer_height.min(window_height) {
+    let src_row_start = (y * buffer_width * 4) as usize;
+
+    for x in 0..buffer_width.min(window_width) {
+      let src_idx = src_row_start + (x * 4) as usize;
+      let dst_idx = (offset_y + y as usize) * window_width as usize + offset_x + x as usize;
+
+      if src_idx + 4 <= buffer.len() && dst_idx < surface_buffer.len() {
+        // Convert RGBA to ARGB
+        surface_buffer[dst_idx] = u32::from_le_bytes([
+          buffer[src_idx + 2], // B
+          buffer[src_idx + 1], // G
+          buffer[src_idx],     // R
+          255,                 // A
+        ]);
+      }
+    }
+  }
+}
+
+/// Copies buffer with scaling for softbuffer (RGBA to ARGB conversion)
+fn copy_buffer_scaled_softbuffer(surface_buffer: &mut [u32], buffer: &[u8], params: CopyBufferParams) {
+  let CopyBufferParams {
+    buffer_width,
+    buffer_height,
+    window_width,
+    window_height,
+    offset_x,
+    offset_y,
+    scaled_width,
+    scaled_height,
+  } = params;
+
+  let scale_x = buffer_width as f64 / scaled_width as f64;
+  let scale_y = buffer_height as f64 / scaled_height as f64;
+
+  for y in 0..scaled_height {
+    let src_y = (y as f64 * scale_y).min(buffer_height as f64 - 1.0) as u32;
+    let dst_y = offset_y + y;
+
+    if dst_y >= window_height {
+      break;
+    }
+
+    for x in 0..scaled_width {
+      let src_x = (x as f64 * scale_x).min(buffer_width as f64 - 1.0) as u32;
+      let dst_x = offset_x + x;
+
+      if dst_x >= window_width {
+        break;
+      }
+
+      let src_idx = ((src_y * buffer_width + src_x) * 4) as usize;
+      let dst_idx = (dst_y * window_width + dst_x) as usize;
+
+      if src_idx + 4 <= buffer.len() && dst_idx < surface_buffer.len() {
+        // Convert RGBA to ARGB
+        surface_buffer[dst_idx] = u32::from_le_bytes([
+          buffer[src_idx + 2], // B
+          buffer[src_idx + 1], // G
+          buffer[src_idx],     // R
+          255,                 // A
+        ]);
       }
     }
   }

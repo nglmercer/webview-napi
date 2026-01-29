@@ -97,6 +97,10 @@ pub struct WindowOptions {
   pub icon: Option<Buffer>,
   /// The theme of window.
   pub theme: Option<TaoTheme>,
+  /// Whether to force X11 backend on Linux (default: auto-detect)
+  pub force_x11: Option<bool>,
+  /// Whether to force Wayland backend on Linux (default: auto-detect)
+  pub force_wayland: Option<bool>,
 }
 
 /// Window size limits.
@@ -310,6 +314,10 @@ pub struct WindowAttributes {
   pub icon: Option<Buffer>,
   /// The theme of window.
   pub theme: Option<TaoTheme>,
+  /// Whether to force X11 backend on Linux (default: auto-detect)
+  pub force_x11: Option<bool>,
+  /// Whether to force Wayland backend on Linux (default: auto-detect)
+  pub force_wayland: Option<bool>,
 }
 
 /// Progress bar data from Tao.
@@ -919,6 +927,8 @@ impl WindowBuilder {
         menubar: true,
         icon: None,
         theme: None,
+        force_x11: None,
+        force_wayland: None,
       },
       inner: None,
     })
@@ -1017,6 +1027,20 @@ impl WindowBuilder {
     Ok(self)
   }
 
+  /// Forces X11 backend on Linux.
+  #[napi]
+  pub fn with_force_x11(&mut self, force: bool) -> Result<&Self> {
+    self.attributes.force_x11 = Some(force);
+    Ok(self)
+  }
+
+  /// Forces Wayland backend on Linux.
+  #[napi]
+  pub fn with_force_wayland(&mut self, force: bool) -> Result<&Self> {
+    self.attributes.force_wayland = Some(force);
+    Ok(self)
+  }
+
   /// Builds the window.
   #[napi]
   pub fn build(&mut self, event_loop: &EventLoop) -> Result<Window> {
@@ -1027,10 +1051,15 @@ impl WindowBuilder {
         "Event loop already running or consumed".to_string(),
       )
     })?;
+
+    // Detect platform information
+    let platform_info = crate::tao::platform::platform_info();
+
     println!(
-      "Building window with transparency: {}",
-      self.attributes.transparent
+      "Building window with transparency: {}, platform: {:?}",
+      self.attributes.transparent, platform_info.display_server
     );
+
     let mut builder = tao::window::WindowBuilder::new()
       .with_title(&self.attributes.title)
       .with_inner_size(tao::dpi::LogicalSize::new(
@@ -1051,10 +1080,27 @@ impl WindowBuilder {
       target_os = "openbsd"
     ))]
     {
+      // Handle platform-specific transparency settings
       if self.attributes.transparent {
-        builder = builder.with_rgba_visual(true);
+        // Only enable RGBA visual on X11 or when forced
+        if platform_info.is_x11() || self.attributes.force_x11 == Some(true) {
+          builder = builder.with_rgba_visual(true);
+        }
+        // On Wayland, transparency is handled differently
+        // We don't set with_rgba_visual on Wayland as it's X11-specific
+      }
+
+      // Handle backend selection
+      if self.attributes.force_x11 == Some(true) {
+        // Force X11 backend
+        std::env::set_var("WAYLAND_DISPLAY", "");
+        std::env::set_var("DISPLAY", ":0");
+      } else if self.attributes.force_wayland == Some(true) {
+        // Force Wayland backend
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
       }
     }
+
     #[cfg(target_os = "macos")]
     {
       if self.attributes.transparent {
@@ -1063,20 +1109,29 @@ impl WindowBuilder {
           .with_fullsize_content_view(true);
       }
     }
+
     #[cfg(target_os = "windows")]
     {
       if self.attributes.transparent {
         builder = builder.with_undecorated_shadow(false);
       }
     }
+
     builder = builder
       .with_maximized(self.attributes.maximized)
       .with_focused(self.attributes.focused);
 
-    // Set position if provided
+    // Set position if provided (only supported on X11, not Wayland)
     if let Some(x) = self.attributes.x {
       if let Some(y) = self.attributes.y {
-        builder = builder.with_position(tao::dpi::LogicalPosition::new(x, y));
+        if platform_info.supports_positioning {
+          builder = builder.with_position(tao::dpi::LogicalPosition::new(x, y));
+        } else {
+          println!(
+            "Warning: Window positioning is not supported on {:?}, ignoring position",
+            platform_info.display_server
+          );
+        }
       }
     }
 

@@ -66,6 +66,7 @@ async function main() {
       .withDecorated(true)
       .withVisible(true)
       .withFocused(true)
+      .withForceX11(true)
 
     const window = builder.build(eventLoop)
     logger.success('Window created', { windowId: window.id })

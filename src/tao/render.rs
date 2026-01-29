@@ -3,6 +3,7 @@
 //! Provides a minimal API for rendering RGBA pixel buffers to Tao windows.
 
 use crate::tao::enums::ScaleMode;
+use crate::tao::platform;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -128,6 +129,14 @@ impl PixelRenderer {
       ));
     }
 
+    // Check platform support for direct rendering
+    let platform_info = platform::platform_info();
+
+    if !platform_info.supports_direct_rendering {
+      // Wayland fallback: use alternative rendering approach
+      return self.render_wayland_fallback(&window_guard, &buffer, window_width, window_height);
+    }
+
     // Create pixels surface and renderer
     let surface_texture = pixels::SurfaceTexture::new(window_width, window_height, &*window_guard);
 
@@ -201,6 +210,23 @@ impl PixelRenderer {
     })?;
 
     Ok(())
+  }
+
+  /// Fallback rendering method for Wayland
+  ///
+  /// This method is not implemented and always returns an error.
+  /// Direct pixel buffer rendering is not supported on Wayland.
+  fn render_wayland_fallback(
+    &self,
+    _window: &tao::window::Window,
+    _buffer: &[u8],
+    _window_width: u32,
+    _window_height: u32,
+  ) -> napi::Result<()> {
+    Err(napi::Error::new(
+      napi::Status::GenericFailure,
+      "Direct pixel buffer rendering is not supported on Wayland".to_string(),
+    ))
   }
 }
 

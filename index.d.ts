@@ -325,6 +325,10 @@ export declare class WindowBuilder {
   withWindowIcon(icon: Buffer): this
   /** Sets the window theme. */
   withTheme(theme: TaoTheme): this
+  /** Forces X11 backend on Linux. */
+  withForceX11(force: boolean): this
+  /** Forces Wayland backend on Linux. */
+  withForceWayland(force: boolean): this
   /** Builds the window. */
   build(eventLoop: EventLoop): Window
 }
@@ -1451,6 +1455,10 @@ export interface WindowAttributes {
   icon?: Buffer
   /** The theme of window. */
   theme?: TaoTheme
+  /** Whether to force X11 backend on Linux (default: auto-detect) */
+  forceX11?: boolean
+  /** Whether to force Wayland backend on Linux (default: auto-detect) */
+  forceWayland?: boolean
 }
 
 /** Window drag details. */
@@ -1549,6 +1557,10 @@ export interface WindowOptions {
   icon?: Buffer
   /** The theme of window. */
   theme?: TaoTheme
+  /** Whether to force X11 backend on Linux (default: auto-detect) */
+  forceX11?: boolean
+  /** Whether to force Wayland backend on Linux (default: auto-detect) */
+  forceWayland?: boolean
 }
 
 /** Window size limits. */

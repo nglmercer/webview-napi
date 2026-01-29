@@ -497,23 +497,6 @@ pub struct Window {
   pub(crate) inner: Option<Arc<Mutex<tao::window::Window>>>,
 }
 
-/// Global storage for window pixel buffers (window_id -> (width, height, buffer))
-use std::collections::HashMap;
-use std::sync::RwLock;
-
-/// Type alias for pixel buffer storage to reduce complexity
-type PixelBufferMap = HashMap<u64, (u32, u32, Vec<u8>)>;
-
-static WINDOW_PIXEL_BUFFERS: RwLock<Option<PixelBufferMap>> = RwLock::new(None);
-
-/// Initialize the global pixel buffer storage
-fn init_pixel_buffer_storage() {
-  let mut storage = WINDOW_PIXEL_BUFFERS.write().unwrap();
-  if storage.is_none() {
-    *storage = Some(HashMap::new());
-  }
-}
-
 #[napi]
 impl Window {
   /// Creates a new window with default attributes.
@@ -523,12 +506,19 @@ impl Window {
   }
 
   /// Gets the window ID.
-  /// Uses the Arc pointer address for a stable identifier
   #[napi(getter)]
   pub fn id(&self) -> Result<u64> {
     if let Some(inner) = &self.inner {
-      // Use Arc pointer address for stable ID
-      Ok(Arc::as_ptr(inner) as u64)
+      let id = inner.lock().unwrap().id();
+      let mut id_val: u64 = 0;
+      unsafe {
+        std::ptr::copy_nonoverlapping(
+          &id as *const _ as *const u8,
+          &mut id_val as *mut _ as *mut u8,
+          std::mem::size_of_val(&id).min(8),
+        );
+      }
+      Ok(id_val)
     } else {
       Ok(0)
     }
@@ -893,31 +883,7 @@ impl Window {
   #[napi]
   pub fn close(&self) -> Result<()> {
     if let Some(inner) = &self.inner {
-      let window_id = inner.lock().unwrap().id();
-      let mut id_val: u64 = 0;
-      unsafe {
-        std::ptr::copy_nonoverlapping(
-          &window_id as *const _ as *const u8,
-          &mut id_val as *mut _ as *mut u8,
-          std::mem::size_of_val(&window_id).min(8),
-        );
-      }
-      crate::tao::render::remove_render_surface(id_val);
       inner.lock().unwrap().request_redraw();
-    }
-    Ok(())
-  }
-
-  /// Renders a pixel buffer to the window (RGBA format)
-  /// This immediately displays the pixels on the window using softbuffer
-  #[napi]
-  pub fn render(&self, width: u32, height: u32, buffer: Buffer) -> Result<()> {
-    if let Some(inner) = &self.inner {
-      let window = inner.lock().unwrap();
-      // Use the Arc pointer address as a stable identifier
-      // This ensures the same window always gets the same ID
-      let id_val: u64 = Arc::as_ptr(inner) as u64;
-      crate::tao::render::render_pixels(&window, id_val, width, height, buffer.as_ref())?;
     }
     Ok(())
   }
@@ -1121,9 +1087,6 @@ impl WindowBuilder {
         format!("Failed to create window: {}", e),
       )
     })?;
-
-    // Initialize pixel buffer storage for this window
-    init_pixel_buffer_storage();
 
     Ok(Window {
       inner: Some(Arc::new(Mutex::new(window))),

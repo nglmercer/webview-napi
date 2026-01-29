@@ -209,10 +209,7 @@ export declare class WebViewBuilder {
 export declare class Window {
   /** Creates a new window with default attributes. */
   constructor()
-  /**
-   * Gets the window ID.
-   * Uses the Arc pointer address for a stable identifier
-   */
+  /** Gets the window ID. */
   get id(): bigint
   /** Gets the window title. */
   title(): string
@@ -276,11 +273,6 @@ export declare class Window {
   requestRedraw(): void
   /** Closes the window. */
   close(): void
-  /**
-   * Renders a pixel buffer to the window (RGBA format)
-   * This immediately displays the pixels on the window using softbuffer
-   */
-  render(width: number, height: number, buffer: Buffer): void
 }
 
 /** Builder for creating windows. */

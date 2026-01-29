@@ -588,6 +588,7 @@ module.exports.WebView = nativeBinding.WebView
 module.exports.WebViewBuilder = nativeBinding.WebViewBuilder
 module.exports.Window = nativeBinding.Window
 module.exports.WindowBuilder = nativeBinding.WindowBuilder
+module.exports.WindowSurface = nativeBinding.WindowSurface
 module.exports.availableMonitors = nativeBinding.availableMonitors
 module.exports.BackgroundThrottlingPolicy = nativeBinding.BackgroundThrottlingPolicy
 module.exports.BadIcon = nativeBinding.BadIcon

@@ -37,7 +37,7 @@ pub use tao::structs::{
   HiDpiScaling, Icon, KeyboardEvent, MonitorInfo, MouseEvent, NotSupportedError, OsError, Position,
   RawKeyEvent, Rectangle, ResizeDetails, ScaleFactorChangeDetails, Size, TaoProgressBar,
   ThemeChangeDetails, Touch, VideoMode, Window, WindowAttributes, WindowBuilder, WindowDragOptions,
-  WindowJumpOptions, WindowOptions, WindowSizeConstraints,
+  WindowJumpOptions, WindowOptions, WindowSizeConstraints, WindowSurface,
 };
 pub use tao::types::{AxisId, ButtonId, DeviceId, Result as TaoResult, WindowId, RGBA as TaoRGBA};
 

@@ -178,14 +178,16 @@ impl PixelRenderer {
         copy_buffer_scaled(
           frame,
           &buffer,
-          self.buffer_width,
-          self.buffer_height,
-          window_width,
-          window_height,
-          offset_x,
-          offset_y,
-          scaled_width,
-          scaled_height,
+          CopyBufferParams {
+            buffer_width: self.buffer_width,
+            buffer_height: self.buffer_height,
+            window_width,
+            window_height,
+            offset_x,
+            offset_y,
+            scaled_width,
+            scaled_height,
+          },
         );
       }
     }
@@ -277,10 +279,8 @@ fn copy_buffer_centered(
   }
 }
 
-/// Copies buffer with scaling (simple nearest-neighbor)
-fn copy_buffer_scaled(
-  frame: &mut [u8],
-  buffer: &[u8],
+/// Parameters for buffer copying with scaling
+struct CopyBufferParams {
   buffer_width: u32,
   buffer_height: u32,
   window_width: u32,
@@ -289,7 +289,21 @@ fn copy_buffer_scaled(
   offset_y: u32,
   scaled_width: u32,
   scaled_height: u32,
-) {
+}
+
+/// Copies buffer with scaling (simple nearest-neighbor)
+fn copy_buffer_scaled(frame: &mut [u8], buffer: &[u8], params: CopyBufferParams) {
+  let CopyBufferParams {
+    buffer_width,
+    buffer_height,
+    window_width,
+    window_height,
+    offset_x,
+    offset_y,
+    scaled_width,
+    scaled_height,
+  } = params;
+
   let scale_x = buffer_width as f64 / scaled_width as f64;
   let scale_y = buffer_height as f64 / scaled_height as f64;
 

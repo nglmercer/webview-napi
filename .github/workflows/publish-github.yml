@@ -95,17 +95,34 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install dependencies
+        run: npm install
+        
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
-          merge-multiple: true
 
-      - name: Move artifacts
-        run: bun run artifacts
+      - name: Move artifacts to root
+        run: |
+          find artifacts -name "*.node" -exec cp {} . \;
+          find artifacts -name "*.wasm" -exec cp {} . \;
 
-      - name: Publish to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
-        run: npm publish ./npm/*.tgz
+      - name: List files
+        run: |
+          echo "Root directory:"
+          ls -lah
+          echo ""
+          echo "Artifacts directory:"
+          ls -lah artifacts/
+
+      - name: Publish 
+        run: |
+          npm config set provenance true
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "Publishing tag: $TAG_NAME"
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+          npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

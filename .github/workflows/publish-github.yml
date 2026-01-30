@@ -61,7 +61,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: bindings-*
+          pattern: ${{env.APP_NAME}}*
           merge-multiple: true
 
       - name: Prepare Package

@@ -226,7 +226,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-${{ matrix.settings.target }}
+          name: ${{env.APP_NAME}}-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
           retention-days: 7
@@ -275,7 +275,7 @@ jobs:
   #     - name: Upload artifact
   #       uses: actions/upload-artifact@v4
   #       with:
-  #         name: bindings-freebsd
+  #         name: ${{env.APP_NAME}}-freebsd
   #         path: ${{ env.APP_NAME }}.*.node
   #         if-no-files-found: error
   #         retention-days: 7

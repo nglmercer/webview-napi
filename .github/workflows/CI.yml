@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  APP_NAME: webview
+  APP_NAME: webview-napi
 
 permissions:
   contents: write

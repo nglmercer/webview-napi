@@ -142,10 +142,11 @@ class Logger {
    * Print banner
    */
   banner(title: string, subtitle?: string): void {
-    console.log(` ${title}${' '.repeat(58 - title.length)}`)
-    if (subtitle) {
-      console.log(` ${subtitle}${' '.repeat(58 - subtitle.length)}`)
-    }
+    const line = '═'.repeat(60)
+    console.log(`\n${line}`)
+    console.log(title)
+    console.log(subtitle)
+    console.log(`\n${line}`)
   }
 }
 

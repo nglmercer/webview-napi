@@ -35,6 +35,7 @@ const eventLoop = new EventLoop()
 const window = new WindowBuilder()
   .withTitle('Simple Render - Black/White')
   .withInnerSize(width, height)
+  .withForceWayland(true)
   .build(eventLoop)
 
 // Create pixel renderer with options
@@ -50,9 +51,8 @@ const renderer = PixelRenderer.withOptions(options)
 let frame = 0
 const maxFrames = 2
 
-const interval = setInterval(() => {
+const renderFrame = () => {
   if (frame >= maxFrames) {
-    clearInterval(interval)
     console.log('✓ Rendering complete!')
     return
   }
@@ -64,15 +64,20 @@ const interval = setInterval(() => {
     renderer.render(window, buffer)
     console.log(`Frame ${frame + 1}/${maxFrames}: ${color}`)
     frame++
+    // Schedule next frame after a delay
+    setTimeout(renderFrame, 500)
   } catch (error) {
     console.error('Render error:', error)
-    clearInterval(interval)
   }
-}, 500)
+}
 
 console.log('Starting render example...')
 console.log('Press Ctrl+C to exit')
 
+// Start rendering
+renderFrame()
+
+// Keep the event loop running
 const poll = () => {
     if (eventLoop.runIteration()) {
         window.id;

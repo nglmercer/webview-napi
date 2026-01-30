@@ -1489,7 +1489,21 @@ export declare const enum WindowEvent {
   /** The window became visible. */
   Visible = 12,
   /** The window became invisible. */
-  Invisible = 13
+  Invisible = 13,
+  /** The cursor entered the window. */
+  CursorEntered = 14,
+  /** The cursor left the window. */
+  CursorLeft = 15,
+  /** The cursor moved within the window. */
+  CursorMoved = 16,
+  /** A mouse input event occurred. */
+  MouseInput = 17,
+  /** A keyboard input event occurred. */
+  KeyboardInput = 18,
+  /** The keyboard modifiers have changed. */
+  ModifiersChanged = 19,
+  /** The event loop is about to wait for new events. */
+  AboutToWait = 20
 }
 
 /** Window event data. */

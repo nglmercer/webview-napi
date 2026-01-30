@@ -1,16 +1,23 @@
-name: Publish GitHub
-
-env:
-  APP_NAME: webview
-
-permissions:
-  contents: write
-  id-token: write
+name: Build & Release
 
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag Version (e.g. v0.0.1)'
+        required: true
+        default: 'v0.0.1'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  APP_NAME: webview
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,107 +29,62 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
 
-  github_release:
-    name: Publish to GitHub Releases
+  # JOB 2: PUBLISH (Github Release + NPM)
+  release:
+    name: Publish Release
+    needs: build-release
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs:
-      - call-build
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+      - name: Determine Tag
+        id: tag_info
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "TAG_NAME=${{ inputs.version }}" >> $GITHUB_ENV
+          else
+            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://registry.npmjs.org"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
 
-      - name: Move artifacts
-        run: bun run artifacts
+      - name: Prepare Package
+        run: |
+          mkdir -p package
 
-      - name: List packages
-        run: ls -R ./npm
-        shell: bash
+          cp package.json index.js index.d.ts README.md LICENSE package/ 2>/dev/null || true
+
+          echo "Flattening artifacts..."
+          find artifacts -name "*.node" -exec cp {} package/ \;
+
+          ls -l package/
+
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          echo "Setting version to $VERSION"
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package/package.json')); p.version='$VERSION'; fs.writeFileSync('package/package.json', JSON.stringify(p,null,2));"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
+          files: package/*.node
+          tag_name: ${{ env.TAG_NAME }}
+          name: Release ${{ env.TAG_NAME }}
           draft: false
-          make_latest: true
-          files: |
-            ./npm/*.tgz
-          body: |
-            ## Release ${{ github.ref_name }}
-
-            This release includes native bindings for:
-            - Windows (x86_64, i686, ARM64)
-            - macOS (x86_64, ARM64)
-            - Linux (x86_64, ARM64, ARMv7)
-            - Android (ARM64, ARMv7)
-
-  npm_publish:
-    name: Publish to npm
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs:
-      - call-build
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install dependencies
-        run: npm install
-        
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: artifacts
-
-      - name: Move artifacts to root
-        run: |
-          find artifacts -name "*.node" -exec cp {} . \;
-          find artifacts -name "*.wasm" -exec cp {} . \;
-
-      - name: List files
-        run: |
-          echo "Root directory:"
-          ls -lah
-          echo ""
-          echo "Artifacts directory:"
-          ls -lah artifacts/
-
-      - name: Publish 
-        run: |
-          npm config set provenance true
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          echo "Publishing tag: $TAG_NAME"
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
-          npm publish --access public
+          prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

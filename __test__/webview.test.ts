@@ -25,7 +25,7 @@ import {
   ProgressState,
   ResizeDirection,
   StartCause,
-  TaoTheme,
+  Theme,
   TouchPhase,
   UserAttentionType,
   WryTheme,
@@ -412,9 +412,9 @@ describe('Enums de la biblioteca webview', () => {
     expect(StartCause.Init).toBe(4)
   })
 
-  test('TaoTheme tiene valores correctos', () => {
-    expect(TaoTheme.Light).toBe(0)
-    expect(TaoTheme.Dark).toBe(1)
+  test('Theme tiene valores correctos', () => {
+    expect(Theme.Light).toBe(0)
+    expect(Theme.Dark).toBe(1)
   })
 
   test('TouchPhase tiene valores correctos', () => {
@@ -841,8 +841,8 @@ describe('Interfaces adicionales', () => {
   })
 
   test('ThemeChangeDetails tiene estructura correcta', () => {
-    const details: any = { newTheme: TaoTheme.Dark }
-    expect(details.newTheme).toBe(TaoTheme.Dark)
+    const details: any = { newTheme: Theme.Dark }
+    expect(details.newTheme).toBe(Theme.Dark)
   })
 
   test('Touch tiene estructura correcta', () => {
@@ -938,13 +938,13 @@ describe('Interfaces adicionales', () => {
       focused: true,
       menubar: true,
       icon: undefined,
-      theme: TaoTheme.Light
+      theme: Theme.Light
     }
     expect(attributes.title).toBe('Window Test')
     expect(attributes.width).toBe(800)
     expect(attributes.height).toBe(600)
     expect(attributes.resizable).toBe(true)
-    expect(attributes.theme).toBe(TaoTheme.Light)
+    expect(attributes.theme).toBe(Theme.Light)
   })
 
   test('WindowDragOptions tiene estructura correcta', () => {
@@ -979,13 +979,13 @@ describe('Interfaces adicionales', () => {
       focused: true,
       menubar: true,
       icon: undefined,
-      theme: TaoTheme.Dark
+      theme: Theme.Dark
     }
     expect(options.title).toBe('Window Options Test')
     expect(options.width).toBe(800)
     expect(options.height).toBe(600)
     expect(options.resizable).toBe(true)
-    expect(options.theme).toBe(TaoTheme.Dark)
+    expect(options.theme).toBe(Theme.Dark)
   })
 
   test('WindowSizeConstraints tiene estructura correcta', () => {

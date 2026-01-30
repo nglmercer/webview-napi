@@ -22,14 +22,7 @@ use crate::winit::enums::{WinitControlFlow, WinitFullscreenType, WinitTheme};
 use crate::winit::structs::Position;
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowAttributesExtMacOS;
-#[cfg(any(
-  target_os = "linux",
-  target_os = "dragonfly",
-  target_os = "freebsd",
-  target_os = "netbsd",
-  target_os = "openbsd"
-))]
-use winit::platform::x11::WindowBuilderExtX11;
+
 
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowBuilderExtWindows;

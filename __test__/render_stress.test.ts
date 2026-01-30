@@ -152,6 +152,10 @@ beforeAll(async () => {
  */
 describe('Render Stress Tests', () => {
   test('should handle 250+ frames without resource exhaustion', async () => {
+    if (process.platform === 'linux' && !gtkAvailable) {
+      console.log('Skipping test on Linux because GTK is not available/enabled')
+      return
+    }
     const width = 1920  // High resolution width
     const height = 1080 // High resolution height
     const frameCount = 5000 // More than 231 to trigger the issue
@@ -232,6 +236,10 @@ describe('Render Stress Tests', () => {
   }, 90000) // 90 second timeout
   
   test('should handle multiple renderers without client limit error', async () => {
+    if (process.platform === 'linux' && !gtkAvailable) {
+      console.log('Skipping test on Linux because GTK is not available/enabled')
+      return
+    }
     const width = 800
     const height = 600
     const rendererCount = 10

@@ -89,7 +89,7 @@ export declare class EventLoopWindowTarget {
 }
 
 /**
- * Simple pixel renderer for Tao windows
+ * Simple pixel renderer for Winit windows
  *
  * NOTE: This renderer uses global caches to avoid X11 client limit errors.
  * The "Maximum number of clients reached" error occurs when creating too many
@@ -110,7 +110,7 @@ export declare class PixelRenderer {
    * Renders a pixel buffer to the given window
    *
    * # Arguments
-   * * `window` - The Tao window to render to
+   * * `window` - The Winit window to render to
    * * `buffer` - RGBA pixel buffer (must be buffer_width * buffer_height * 4 bytes)
    *
    * # Performance Note
@@ -305,9 +305,9 @@ export declare class Window {
   /** Drags the window. */
   dragWindow(): boolean
   /** Sets the window theme. */
-  setTheme(theme: TaoTheme): void
+  setTheme(theme: WinitTheme): void
   /** Gets the window theme. */
-  theme(): TaoTheme | null
+  theme(): WinitTheme | null
   /** Sets the window icon. */
   setWindowIcon(width: number, height: number, rgba: Buffer): void
   /** Sets whether to ignore cursor events. */
@@ -347,7 +347,7 @@ export declare class WindowBuilder {
   /** Sets the window icon. */
   withWindowIcon(icon: Buffer): this
   /** Sets the window theme. */
-  withTheme(theme: TaoTheme): this
+  withTheme(theme: WinitTheme): this
   /** Forces X11 backend on Linux. */
   withForceX11(force: boolean): this
   /** Forces Wayland backend on Linux. */
@@ -1269,45 +1269,6 @@ export declare const enum StartCause {
   Init = 4
 }
 
-/** Control flow of the application event loop. */
-export declare const enum TaoControlFlow {
-  /** The application will continue running normally. */
-  Poll = 0,
-  /** The application will wait until the specified time. */
-  WaitUntil = 1,
-  /** The application will exit. */
-  Exit = 2,
-  /** The application will exit with the given exit code. */
-  ExitWithCode = 3
-}
-
-/** Fullscreen type. */
-export declare const enum TaoFullscreenType {
-  /** Exclusive fullscreen. */
-  Exclusive = 0,
-  /** Borderless fullscreen. */
-  Borderless = 1
-}
-
-/** Progress bar data from Tao. */
-export interface TaoProgressBar {
-  /** The progress state. */
-  state: string
-  /** The progress value (0-100). */
-  progress: number
-}
-
-/** Window theme. */
-export declare const enum TaoTheme {
-  /** Light theme. */
-  Light = 0,
-  /** Dark theme. */
-  Dark = 1
-}
-
-/** Returns the current version of the tao crate. */
-export declare function taoVersion(): string
-
 export declare const enum Theme {
   Light = 0,
   Dark = 1,
@@ -1317,7 +1278,7 @@ export declare const enum Theme {
 /** Theme change details. */
 export interface ThemeChangeDetails {
   /** The new theme. */
-  newTheme: TaoTheme
+  newTheme: WinitTheme
 }
 
 /** Touch event data. */
@@ -1481,7 +1442,7 @@ export interface WindowAttributes {
   /** The icon of window. */
   icon?: Buffer
   /** The theme of window. */
-  theme?: TaoTheme
+  theme?: WinitTheme
   /** Whether to force X11 backend on Linux (default: auto-detect) */
   forceX11?: boolean
   /** Whether to force Wayland backend on Linux (default: auto-detect) */
@@ -1583,7 +1544,7 @@ export interface WindowOptions {
   /** The icon of window. */
   icon?: Buffer
   /** The theme of window. */
-  theme?: TaoTheme
+  theme?: WinitTheme
   /** Whether to force X11 backend on Linux (default: auto-detect) */
   forceX11?: boolean
   /** Whether to force Wayland backend on Linux (default: auto-detect) */
@@ -1601,6 +1562,45 @@ export interface WindowSizeConstraints {
   /** The maximum height. */
   maxHeight?: number
 }
+
+/** Control flow of the application event loop. */
+export declare const enum WinitControlFlow {
+  /** The application will continue running normally. */
+  Poll = 0,
+  /** The application will wait until the specified time. */
+  WaitUntil = 1,
+  /** The application will exit. */
+  Exit = 2,
+  /** The application will exit with the given exit code. */
+  ExitWithCode = 3
+}
+
+/** Fullscreen type. */
+export declare const enum WinitFullscreenType {
+  /** Exclusive fullscreen. */
+  Exclusive = 0,
+  /** Borderless fullscreen. */
+  Borderless = 1
+}
+
+/** Progress bar data from Winit. */
+export interface WinitProgressBar {
+  /** The progress state. */
+  state: string
+  /** The progress value (0-100). */
+  progress: number
+}
+
+/** Window theme. */
+export declare const enum WinitTheme {
+  /** Light theme. */
+  Light = 0,
+  /** Dark theme. */
+  Dark = 1
+}
+
+/** Returns the current version of the tao crate. */
+export declare function winitVersion(): string
 
 /** Theme for the webview. */
 export declare const enum WryTheme {

@@ -18,10 +18,10 @@ pub(crate) enum PendingWebviewAction {
 }
 
 #[allow(unused_imports)]
-use crate::tao::enums::{TaoControlFlow, TaoFullscreenType, TaoTheme};
-use crate::tao::structs::Position;
+use crate::winit::enums::{WinitControlFlow, WinitFullscreenType, WinitTheme};
+use crate::winit::structs::Position;
 #[cfg(target_os = "macos")]
-use tao::platform::macos::WindowBuilderExtMacOS;
+use winit::platform::macos::WindowBuilderExtMacOS;
 #[cfg(any(
   target_os = "linux",
   target_os = "dragonfly",
@@ -29,9 +29,17 @@ use tao::platform::macos::WindowBuilderExtMacOS;
   target_os = "netbsd",
   target_os = "openbsd"
 ))]
-use tao::platform::unix::WindowBuilderExtUnix;
+use winit::platform::x11::WindowBuilderExtX11;
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+use winit::platform::wayland::WindowBuilderExtWayland;
 #[cfg(target_os = "windows")]
-use tao::platform::windows::WindowBuilderExtWindows;
+use winit::platform::windows::WindowBuilderExtWindows;
 
 #[napi]
 pub enum WebviewApplicationEvent {
@@ -170,7 +178,7 @@ pub struct WebviewOptions {
 
 type PendingWindow = (
   BrowserWindowOptions,
-  Arc<Mutex<Option<crate::tao::structs::Window>>>,
+  Arc<Mutex<Option<crate::winit::structs::Window>>>,
   Arc<Mutex<Vec<PendingWebview>>>,
 );
 
@@ -184,8 +192,8 @@ type PendingWebview = (
 #[napi]
 pub struct Application {
   #[allow(clippy::arc_with_non_send_sync)]
-  event_loop: Arc<Mutex<Option<tao::event_loop::EventLoop<()>>>>,
-  event_loop_proxy: tao::event_loop::EventLoopProxy<()>,
+  event_loop: Arc<Mutex<Option<winit::event_loop::EventLoop<()>>>>,
+  event_loop_proxy: winit::event_loop::EventLoopProxy<()>,
   handler: Arc<Mutex<Option<ThreadsafeFunction<ApplicationEvent>>>>,
   #[allow(clippy::arc_with_non_send_sync)]
   windows_to_create: Arc<Mutex<Vec<PendingWindow>>>,
@@ -196,7 +204,7 @@ pub struct Application {
 impl Application {
   #[napi(constructor)]
   pub fn new(_options: Option<ApplicationOptions>) -> Self {
-    let event_loop = tao::event_loop::EventLoop::new();
+    let event_loop = winit::event_loop::EventLoop::new().unwrap();
     let event_loop_proxy = event_loop.create_proxy();
     Self {
       #[allow(clippy::arc_with_non_send_sync)]
@@ -264,12 +272,12 @@ impl Application {
     let _ = self.event_loop_proxy.send_event(());
   }
 
-  fn process_pending_items(&self, event_loop_target: &tao::event_loop::EventLoopWindowTarget<()>) {
+  fn process_pending_items(&self, event_loop_target: &winit::event_loop::EventLoopWindowTarget<()>) {
     let mut pending = self.windows_to_create.lock().unwrap();
     for (opts, win_handle, webviews_to_create) in pending.drain(..) {
-      let mut builder = tao::window::WindowBuilder::new()
+      let mut builder = winit::window::WindowBuilder::new()
         .with_title(opts.title.clone().unwrap_or_default())
-        .with_inner_size(tao::dpi::LogicalSize::new(
+        .with_inner_size(winit::dpi::LogicalSize::new(
           opts.width.unwrap_or(800.0),
           opts.height.unwrap_or(600.0),
         ))
@@ -300,19 +308,23 @@ impl Application {
           target_os = "openbsd"
         ))]
         {
-          builder = builder.with_rgba_visual(true);
+          // Check if we are running on X11 or Wayland
+          let using_x11 = std::env::var("WAYLAND_DISPLAY").is_err();
+          if using_x11 {
+             builder = builder.with_rgba_visual(true);
+          }
         }
       }
 
       if let Some(x) = opts.x {
         if let Some(y) = opts.y {
-          builder = builder.with_position(tao::dpi::LogicalPosition::new(x, y));
+          builder = builder.with_position(winit::dpi::LogicalPosition::new(x, y));
         }
       }
 
       if let Ok(window) = builder.build(event_loop_target) {
         let mut handle = win_handle.lock().unwrap();
-        *handle = Some(crate::tao::structs::Window {
+        *handle = Some(crate::winit::structs::Window {
           #[allow(clippy::arc_with_non_send_sync)]
           inner: Some(Arc::new(Mutex::new(window))),
         });
@@ -403,18 +415,18 @@ impl Application {
       #[allow(clippy::arc_with_non_send_sync)]
       let app_ref = Arc::new(self.clone_internal());
 
-      event_loop.run(move |event, event_loop_target, control_flow| {
-        *control_flow = tao::event_loop::ControlFlow::Wait;
+      let _ = event_loop.run(move |event, event_loop_target| {
+        event_loop_target.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
         if *exit_requested.lock().unwrap() {
-          *control_flow = tao::event_loop::ControlFlow::Exit;
+          event_loop_target.exit();
           return;
         }
 
         app_ref.process_pending_items(event_loop_target);
 
-        if let tao::event::Event::WindowEvent {
-          event: tao::event::WindowEvent::CloseRequested,
+        if let winit::event::Event::WindowEvent {
+          event: winit::event::WindowEvent::CloseRequested,
           ..
         } = event
         {
@@ -427,7 +439,7 @@ impl Application {
               ThreadsafeFunctionCallMode::NonBlocking,
             );
           }
-          *control_flow = tao::event_loop::ControlFlow::Exit;
+          event_loop_target.exit();
         }
       });
     }
@@ -449,7 +461,7 @@ impl Application {
     let mut event_loop_lock = self.event_loop.lock().unwrap();
 
     if let Some(event_loop) = event_loop_lock.as_mut() {
-      use tao::platform::run_return::EventLoopExtRunReturn;
+      use winit::platform::run_return::EventLoopExtRunReturn;
 
       let handler_clone = self.handler.clone();
       let exit_requested = self.exit_requested.clone();
@@ -460,14 +472,14 @@ impl Application {
         return false;
       }
 
-      event_loop.run_return(|event, event_loop_target, control_flow| {
-        *control_flow = tao::event_loop::ControlFlow::Poll;
+      let _ = event_loop.run_return(|event, event_loop_target| {
+        event_loop_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         app_ref.process_pending_items(event_loop_target);
 
         match event {
-          tao::event::Event::WindowEvent {
-            event: tao::event::WindowEvent::CloseRequested,
+          winit::event::Event::WindowEvent {
+            event: winit::event::WindowEvent::CloseRequested,
             ..
           } => {
             let mut h = handler_clone.lock().unwrap();
@@ -480,10 +492,10 @@ impl Application {
               );
             }
             keep_running = false;
-            *control_flow = tao::event_loop::ControlFlow::Exit;
+            event_loop_target.exit();
           }
-          tao::event::Event::RedrawEventsCleared => {
-            *control_flow = tao::event_loop::ControlFlow::Exit;
+          winit::event::Event::RedrawEventsCleared => {
+            event_loop_target.exit();
           }
           _ => {}
         }
@@ -495,7 +507,7 @@ impl Application {
 
 #[napi]
 pub struct BrowserWindow {
-  pub(crate) inner: Arc<Mutex<Option<crate::tao::structs::Window>>>,
+  pub(crate) inner: Arc<Mutex<Option<crate::winit::structs::Window>>>,
   pub(crate) webviews_to_create: Arc<Mutex<Vec<PendingWebview>>>,
 }
 
@@ -643,7 +655,7 @@ impl BrowserWindow {
   pub fn theme(&self) -> Theme {
     if let Some(win) = self.inner.lock().unwrap().as_ref() {
       match win.theme() {
-        Ok(Some(crate::tao::enums::TaoTheme::Dark)) => Theme::Dark,
+        Ok(Some(crate::winit::enums::WinitTheme::Dark)) => Theme::Dark,
         _ => Theme::Light,
       }
     } else {
@@ -655,8 +667,8 @@ impl BrowserWindow {
   pub fn set_theme(&self, theme: Theme) {
     if let Some(win) = self.inner.lock().unwrap().as_ref() {
       let t = match theme {
-        Theme::Dark => crate::tao::enums::TaoTheme::Dark,
-        _ => crate::tao::enums::TaoTheme::Light,
+        Theme::Dark => crate::winit::enums::WinitTheme::Dark,
+        _ => crate::winit::enums::WinitTheme::Light,
       };
       let _ = win.set_theme(t);
     }
@@ -710,7 +722,7 @@ impl BrowserWindow {
   #[napi]
   pub fn get_available_monitors(&self) -> Vec<Monitor> {
     let mut monitors = Vec::new();
-    for m in crate::tao::functions::available_monitors() {
+    for m in crate::winit::functions::available_monitors() {
       monitors.push(Monitor {
         name: m.name,
         scale_factor: m.scale_factor,
@@ -727,7 +739,7 @@ impl BrowserWindow {
 
   #[napi]
   pub fn get_primary_monitor(&self) -> Option<Monitor> {
-    let m = crate::tao::functions::primary_monitor();
+    let m = crate::winit::functions::primary_monitor();
     Some(Monitor {
       name: m.name,
       scale_factor: m.scale_factor,

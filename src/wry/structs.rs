@@ -543,92 +543,33 @@ impl WebViewBuilder {
     }
 
     // Build the webview
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
-    ))]
-    {
-      extern "C" {
-        fn gtk_bin_get_child(bin: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
-        fn gtk_container_remove(container: *mut std::ffi::c_void, widget: *mut std::ffi::c_void);
-        fn gtk_widget_show_all(widget: *mut std::ffi::c_void);
-      }
+    // Unified build path for all platforms
+    
+    // IPC Handler
+    let (webview_builder_with_ipc, listeners) = setup_ipc_handler(
+      self.ipc_handler.take(),
+      self.ipc_handlers.drain(..).collect(),
+      webview_builder,
+      ipc_listeners_override,
+    );
+    let ipc_listeners = listeners;
+    // webview_builder is immutable after setup_ipc_handler returns the new builder, so assign it
+    let webview_builder = webview_builder_with_ipc;
 
-      let window_ptr = window_inner.gtk_window();
-      let window_ptr_raw = unsafe { *(window_ptr as *const _ as *const *mut std::ffi::c_void) };
-
-      unsafe {
-        let child = gtk_bin_get_child(window_ptr_raw);
-        if !child.is_null() {
-          gtk_container_remove(window_ptr_raw, child);
-        }
-      }
-
-      // IPC Handler
-      let (webview_builder_with_ipc, listeners) = setup_ipc_handler(
-        self.ipc_handler.take(),
-        self.ipc_handlers.drain(..).collect(),
-        webview_builder,
-        ipc_listeners_override,
-      );
-      let ipc_listeners = listeners;
-      webview_builder = webview_builder_with_ipc;
-
-      let webview = webview_builder.build_gtk(window_ptr).map_err(|e| {
-        napi::Error::new(
-          napi::Status::GenericFailure,
-          format!("Failed to create webview: {}", e),
-        )
-      })?;
-
-      unsafe {
-        gtk_widget_show_all(window_ptr_raw);
-      }
-
-      #[allow(clippy::arc_with_non_send_sync)]
-      let webview_inner = Arc::new(Mutex::new(webview));
-      Ok(WebView {
-        inner: Some(webview_inner),
-        label,
-        ipc_listeners,
-      })
-    }
-
-    #[cfg(not(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
-    )))]
-    {
-      // IPC Handler
-      let (webview_builder_with_ipc, listeners) = setup_ipc_handler(
-        self.ipc_handler.take(),
-        self.ipc_handlers.drain(..).collect(),
-        webview_builder,
-        ipc_listeners_override,
-      );
-      let ipc_listeners = listeners;
-      webview_builder = webview_builder_with_ipc;
-
-      let webview = webview_builder.build(&*window_inner).map_err(|e| {
-        napi::Error::new(
-          napi::Status::GenericFailure,
-          format!("Failed to create webview: {}", e),
-        )
-      })?;
-      #[allow(clippy::arc_with_non_send_sync)]
-      let webview_inner = Arc::new(Mutex::new(webview));
-      Ok(WebView {
-        inner: Some(webview_inner),
-        label,
-        ipc_listeners,
-      })
-    }
+    let webview = webview_builder.build(&*window_inner).map_err(|e| {
+      napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("Failed to create webview: {}", e),
+      )
+    })?;
+    
+    #[allow(clippy::arc_with_non_send_sync)]
+    let webview_inner = Arc::new(Mutex::new(webview));
+    Ok(WebView {
+      inner: Some(webview_inner),
+      label,
+      ipc_listeners,
+    })
   }
 
   /// Builds the webview.

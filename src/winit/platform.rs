@@ -47,19 +47,19 @@ impl PlatformInfo {
           display_server,
           supports_transparency: true,
           supports_positioning: false, // Wayland doesn't allow arbitrary positioning
-          supports_direct_rendering: false, // Wayland requires different rendering approach
+          supports_direct_rendering: true, // softbuffer works on Wayland
         },
         DisplayServer::X11 => PlatformInfo {
           display_server,
           supports_transparency: true,
           supports_positioning: true,
-          supports_direct_rendering: true,
+          supports_direct_rendering: true, // softbuffer works on X11
         },
         DisplayServer::Unknown => PlatformInfo {
           display_server,
           supports_transparency: false,
           supports_positioning: false,
-          supports_direct_rendering: false,
+          supports_direct_rendering: true, // softbuffer is cross-platform
         },
       }
     }
@@ -70,7 +70,7 @@ impl PlatformInfo {
         display_server: DisplayServer::Unknown,
         supports_transparency: cfg!(target_os = "macos") || cfg!(target_os = "windows"),
         supports_positioning: true,
-        supports_direct_rendering: true,
+        supports_direct_rendering: true, // softbuffer works on macOS and Windows
       }
     }
   }

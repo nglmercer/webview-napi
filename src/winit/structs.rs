@@ -16,7 +16,7 @@ use crate::winit::types::Result;
 use winit::platform::macos::WindowAttributesExtMacOS;
 
 #[cfg(target_os = "windows")]
-use winit::platform::windows::WindowBuilderExtWindows;
+use winit::platform::windows::WindowAttributesExtWindows;
 
 
 /// Forward declaration for MonitorInfo to avoid circular dependencies
@@ -405,16 +405,25 @@ impl EventLoop {
   #[napi]
   pub fn run(&mut self) -> Result<()> {
     if let Some(event_loop) = self.inner.take() {
-      let _ = event_loop.run(move |event, elwt| {
-        elwt.set_control_flow(winit::event_loop::ControlFlow::Wait);
-        if let winit::event::Event::WindowEvent {
-          event: winit::event::WindowEvent::CloseRequested,
-          ..
-        } = event
-        {
-          elwt.exit();
+      use winit::application::ApplicationHandler;
+      use winit::event_loop::ActiveEventLoop;
+      
+      struct SimpleAppHandler;
+      impl ApplicationHandler for SimpleAppHandler {
+        fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+        fn window_event(
+          &mut self,
+          event_loop: &ActiveEventLoop,
+          _window_id: winit::window::WindowId,
+          event: winit::event::WindowEvent,
+        ) {
+          if let winit::event::WindowEvent::CloseRequested = event {
+            event_loop.exit();
+          }
         }
-      });
+      }
+      
+      let _ = event_loop.run_app(&mut SimpleAppHandler);
     }
     Ok(())
   }
@@ -453,119 +462,90 @@ impl EventLoop {
       ))]
       {
         use winit::platform::pump_events::EventLoopExtPumpEvents;
-        let status = event_loop.pump_events(None, |event, elwt| {
-          elwt.set_control_flow(winit::event_loop::ControlFlow::Poll);
-          match event {
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::CloseRequested,
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::CloseRequested);
-              keep_running = false;
-              elwt.exit();
-            }
-            // Handle other window events to keep the window responsive
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::RedrawRequested,
-              ..
-            } => {
-              // Window requested redraw - this is normal, continue running
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::Resized(_),
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::Resized);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::Moved(_),
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::Moved);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::Focused(focused),
-              window_id,
-            } => {
-              let event = if focused {
-                WindowEvent::Focused
-              } else {
-                WindowEvent::Unfocused
-              };
-              Self::emit_window_event(&event_handler, window_id, event);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::CursorEntered { .. },
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::CursorEntered);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::CursorLeft { .. },
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::CursorLeft);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::CursorMoved { .. },
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::CursorMoved);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::MouseInput { .. },
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::MouseInput);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::KeyboardInput { .. },
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::KeyboardInput);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::ScaleFactorChanged { .. },
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::ScaleFactorChanged);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::ThemeChanged(_),
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::ThemeChanged);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::ModifiersChanged(_),
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::ModifiersChanged);
-            }
-            winit::event::Event::WindowEvent {
-              event: winit::event::WindowEvent::Destroyed,
-              window_id,
-            } => {
-              Self::emit_window_event(&event_handler, window_id, WindowEvent::Destroyed);
-              // Window destroyed - exit the loop
-              keep_running = false;
-              elwt.exit();
-            }
-            winit::event::Event::AboutToWait => {
-              // Emit AboutToWait event to allow JavaScript to perform idle tasks
-              let handler = event_handler.lock().unwrap();
-              if let Some(handler) = handler.as_ref() {
-                // Use window_id 0 since AboutToWait is not associated with a specific window
-                let event_data = WindowEventData {
-                  event: WindowEvent::AboutToWait,
-                  window_id: 0,
-                };
-                let _ = handler.call(Ok(event_data), ThreadsafeFunctionCallMode::NonBlocking);
+        use winit::application::ApplicationHandler;
+        use winit::event_loop::ActiveEventLoop;
+        
+        struct PumpAppHandler {
+          event_handler: Arc<Mutex<Option<ThreadsafeFunction<WindowEventData>>>>,
+          keep_running: bool,
+        }
+        
+        impl ApplicationHandler for PumpAppHandler {
+          fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+          
+          fn window_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            window_id: winit::window::WindowId,
+            event: winit::event::WindowEvent,
+          ) {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+            match event {
+              winit::event::WindowEvent::CloseRequested => {
+                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::CloseRequested);
+                self.keep_running = false;
+                event_loop.exit();
               }
+              winit::event::WindowEvent::RedrawRequested => {
+                // Window requested redraw - this is normal, continue running
+              }
+              winit::event::WindowEvent::Resized(_) => {
+                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::Resized);
+              }
+              winit::event::WindowEvent::Moved(_) => {
+                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::Moved);
+              }
+              winit::event::WindowEvent::Focused(focused) => {
+                let event = if focused {
+                  WindowEvent::Focused
+                } else {
+                  WindowEvent::Unfocused
+                };
+                Self::emit_window_event(&self.event_handler, window_id, event);
+              }
+              winit::event::WindowEvent::CursorEntered { .. } => {
+                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::CursorEntered);
+              }
+              winit::event::WindowEvent::CursorLeft { .. } => {
+                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::CursorLeft);
+              }
+              winit::event::WindowEvent::CursorMoved { .. } => {
+                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::CursorMoved);
+              }
+              winit::event::WindowEvent::MouseInput { .. } => {
+                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::MouseInput);
+              }
+              _ => {}
             }
-            _ => {}
           }
-        });
+        }
+        
+        impl PumpAppHandler {
+          fn emit_window_event(
+            event_handler: &Arc<Mutex<Option<ThreadsafeFunction<WindowEventData>>>>,
+            window_id: winit::window::WindowId,
+            event: WindowEvent,
+          ) {
+            let handler = event_handler.lock().unwrap();
+            if let Some(handler) = handler.as_ref() {
+              let window_id_u32 = window_id_to_u32(window_id);
+              let event_data = WindowEventData {
+                event,
+                window_id: window_id_u32,
+              };
+              let _ = handler.call(Ok(event_data), ThreadsafeFunctionCallMode::NonBlocking);
+            }
+          }
+        }
+        
+        let mut handler = PumpAppHandler {
+          event_handler: event_handler.clone(),
+          keep_running: true,
+        };
+        
+        let status = event_loop.pump_app_events(None, &mut handler);
+        keep_running = handler.keep_running;
+        
         if let winit::platform::pump_events::PumpStatus::Exit(_) = status {
           keep_running = false;
         }
@@ -608,7 +588,7 @@ impl EventLoopBuilder {
   #[napi(constructor)]
   pub fn new() -> Result<Self> {
     Ok(Self {
-      inner: Some(winit::event_loop::EventLoopBuilder::new())
+      inner: Some(winit::event_loop::EventLoop::builder())
     })
   }
 
@@ -676,7 +656,7 @@ impl EventLoopProxy {
 #[napi]
 pub struct EventLoopWindowTarget {
   #[allow(dead_code)]
-  inner: Option<winit::event_loop::EventLoopWindowTarget<()>>,
+  inner: Option<winit::event_loop::ActiveEventLoop>,
 }
 
 /// Window for displaying content.
@@ -967,7 +947,7 @@ impl Window {
         CursorIcon::ZoomIn => winit::window::CursorIcon::ZoomIn,
         CursorIcon::ZoomOut => winit::window::CursorIcon::ZoomOut,
       };
-      inner.lock().unwrap().set_cursor_icon(winit_cursor);
+      inner.lock().unwrap().set_cursor(winit_cursor);
     }
     Ok(())
   }
@@ -1075,8 +1055,6 @@ impl Window {
 #[napi]
 pub struct WindowBuilder {
   attributes: WindowAttributes,
-  #[allow(dead_code)]
-  inner: Option<winit::window::WindowBuilder>,
 }
 
 #[napi]
@@ -1102,7 +1080,6 @@ impl WindowBuilder {
         icon: None,
         theme: None,
       },
-      inner: None,
     })
   }
 
@@ -1228,7 +1205,9 @@ impl WindowBuilder {
     } else {
       winit::window::WindowLevel::Normal
     };
-    let mut builder = winit::window::WindowBuilder::new()
+
+    // Build window attributes directly (WindowBuilder was removed in winit 0.30)
+    let mut window_attributes = winit::window::WindowAttributes::default()
       .with_title(&self.attributes.title)
       .with_inner_size(winit::dpi::LogicalSize::new(
         self.attributes.width,
@@ -1256,7 +1235,7 @@ impl WindowBuilder {
     #[cfg(target_os = "macos")]
     {
       if self.attributes.transparent {
-        builder = builder
+        window_attributes = window_attributes
           .with_titlebar_transparent(true)
           .with_fullsize_content_view(true);
       }
@@ -1265,11 +1244,11 @@ impl WindowBuilder {
     #[cfg(target_os = "windows")]
     {
       if self.attributes.transparent {
-        builder = builder.with_undecorated_shadow(false);
+        window_attributes = window_attributes.with_undecorated_shadow(false);
       }
     }
 
-    builder = builder
+    window_attributes = window_attributes
       .with_maximized(self.attributes.maximized)
       .with_active(self.attributes.focused);
 
@@ -1277,7 +1256,7 @@ impl WindowBuilder {
     if let Some(x) = self.attributes.x {
       if let Some(y) = self.attributes.y {
         if platform_info.supports_positioning {
-          builder = builder.with_position(winit::dpi::LogicalPosition::new(x, y));
+          window_attributes = window_attributes.with_position(winit::dpi::LogicalPosition::new(x, y));
         } else {
           println!(
             "Warning: Window positioning is not supported on {:?}, ignoring position",
@@ -1287,8 +1266,8 @@ impl WindowBuilder {
       }
     }
 
-    // Build the window
-    let window = builder.build(el).map_err(|e| {
+    // Build the window using create_window
+    let window = el.create_window(window_attributes).map_err(|e| {
       napi::Error::new(
         napi::Status::GenericFailure,
         format!("Failed to create window: {}", e),

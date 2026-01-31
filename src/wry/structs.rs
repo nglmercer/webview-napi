@@ -12,7 +12,7 @@ use crate::wry::enums::WryTheme;
 use crate::wry::types::Result;
 
 #[cfg(target_os = "linux")]
-use gtk::prelude::*;
+// use gtk::prelude::*;
 
 /// An initialization script to be run when creating a webview.
 #[napi(object)]
@@ -608,7 +608,7 @@ impl WebViewBuilder {
     } else {
       winit::window::WindowLevel::Normal
     };
-    let mut window_builder = winit::window::WindowBuilder::new()
+    let mut window_attributes = winit::window::WindowAttributes::default()
       .with_title(self.attributes.title.as_deref().unwrap_or("WebView"))
       .with_inner_size(winit::dpi::LogicalSize::new(
         self.attributes.width,
@@ -624,7 +624,7 @@ impl WebViewBuilder {
 
     // Set position if provided
     if self.attributes.x != 0 || self.attributes.y != 0 {
-      window_builder = window_builder.with_position(winit::dpi::LogicalPosition::new(
+      window_attributes = window_attributes.with_position(winit::dpi::LogicalPosition::new(
         self.attributes.x,
         self.attributes.y,
       ));
@@ -632,13 +632,13 @@ impl WebViewBuilder {
 
     #[cfg(target_os = "linux")]
     {
-      use winit::platform::x11::WindowBuilderExtX11;
+      use winit::platform::x11::WindowAttributesExtX11;
 
-      window_builder = WindowBuilderExtX11::with_name(window_builder, &label, &label);
+      window_attributes = window_attributes.with_name(&label, &label);
     }
 
     // Build the window
-    let window = window_builder.build(el).map_err(|e| {
+    let window = el.create_window(window_attributes).map_err(|e| {
       napi::Error::new(
         napi::Status::GenericFailure,
         format!("Failed to create window: {}", e),

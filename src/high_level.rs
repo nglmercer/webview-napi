@@ -24,7 +24,7 @@ use crate::winit::structs::Position;
 use winit::platform::macos::WindowAttributesExtMacOS;
 
 #[cfg(target_os = "windows")]
-use winit::platform::windows::WindowBuilderExtWindows;
+use winit::platform::windows::WindowAttributesExtWindows;
 
 #[napi]
 pub enum WebviewApplicationEvent {
@@ -265,7 +265,7 @@ impl Application {
 
   fn process_pending_items(
     &self,
-    event_loop_target: &winit::event_loop::EventLoopWindowTarget<()>,
+    event_loop_target: &winit::event_loop::ActiveEventLoop,
   ) {
     let mut pending = self.windows_to_create.lock().unwrap();
     for (opts, win_handle, webviews_to_create) in pending.drain(..) {
@@ -274,7 +274,7 @@ impl Application {
       } else {
         winit::window::WindowLevel::Normal
       };
-      let mut builder = winit::window::WindowBuilder::new()
+      let mut window_attributes = winit::window::WindowAttributes::default()
         .with_title(opts.title.clone().unwrap_or_default())
         .with_inner_size(winit::dpi::LogicalSize::new(
           opts.width.unwrap_or(800.0),
@@ -291,11 +291,11 @@ impl Application {
       if opts.transparent.unwrap_or(false) {
         #[cfg(target_os = "windows")]
         {
-          builder = builder.with_undecorated_shadow(false);
+          window_attributes = window_attributes.with_undecorated_shadow(false);
         }
         #[cfg(target_os = "macos")]
         {
-          builder = builder
+          window_attributes = window_attributes
             .with_titlebar_transparent(true)
             .with_fullsize_content_view(true);
         }
@@ -314,11 +314,11 @@ impl Application {
 
       if let Some(x) = opts.x {
         if let Some(y) = opts.y {
-          builder = builder.with_position(winit::dpi::LogicalPosition::new(x, y));
+          window_attributes = window_attributes.with_position(winit::dpi::LogicalPosition::new(x, y));
         }
       }
 
-      if let Ok(window) = builder.build(event_loop_target) {
+      if let Ok(window) = event_loop_target.create_window(window_attributes) {
         let mut handle = win_handle.lock().unwrap();
         *handle = Some(crate::winit::structs::Window {
           #[allow(clippy::arc_with_non_send_sync)]
@@ -406,43 +406,65 @@ impl Application {
   pub fn run(&mut self) {
     let event_loop = self.event_loop.lock().unwrap().take();
     if let Some(event_loop) = event_loop {
+      use winit::application::ApplicationHandler;
+      use winit::event_loop::ActiveEventLoop;
+      
+      struct AppHandler {
+        handler_clone: Arc<Mutex<Option<ThreadsafeFunction<ApplicationEvent>>>>,
+        exit_requested: Arc<Mutex<bool>>,
+        app_ref: Arc<HighLevelApp>,
+      }
+      
+      impl ApplicationHandler for AppHandler {
+        fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+        
+        fn window_event(
+          &mut self,
+          event_loop: &ActiveEventLoop,
+          _window_id: winit::window::WindowId,
+          event: winit::event::WindowEvent,
+        ) {
+          #[cfg(target_os = "linux")]
+          while gtk::events_pending() {
+            gtk::main_iteration();
+          }
+
+          event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+
+          if *self.exit_requested.lock().unwrap() {
+            event_loop.exit();
+            return;
+          }
+
+          self.app_ref.process_pending_items(event_loop);
+
+          if let winit::event::WindowEvent::CloseRequested = event {
+            let mut h = self.handler_clone.lock().unwrap();
+            if let Some(handler) = h.as_mut() {
+              let _ = handler.call(
+                Ok(ApplicationEvent {
+                  event: WebviewApplicationEvent::WindowCloseRequested,
+                }),
+                ThreadsafeFunctionCallMode::NonBlocking,
+              );
+            }
+            event_loop.exit();
+          }
+        }
+      }
+      
       let handler_clone = self.handler.clone();
       let exit_requested = self.exit_requested.clone();
       #[allow(clippy::arc_with_non_send_sync)]
       let app_ref = Arc::new(self.clone_internal());
+      
+      let mut handler = AppHandler {
+        handler_clone,
+        exit_requested,
+        app_ref,
+      };
 
-      let _ = event_loop.run(move |event, elwt| {
-        #[cfg(target_os = "linux")]
-        while gtk::events_pending() {
-          gtk::main_iteration();
-        }
-
-        elwt.set_control_flow(winit::event_loop::ControlFlow::Wait);
-
-        if *exit_requested.lock().unwrap() {
-          elwt.exit();
-          return;
-        }
-
-        app_ref.process_pending_items(elwt);
-
-        if let winit::event::Event::WindowEvent {
-          event: winit::event::WindowEvent::CloseRequested,
-          ..
-        } = event
-        {
-          let mut h = handler_clone.lock().unwrap();
-          if let Some(handler) = h.as_mut() {
-            let _ = handler.call(
-              Ok(ApplicationEvent {
-                event: WebviewApplicationEvent::WindowCloseRequested,
-              }),
-              ThreadsafeFunctionCallMode::NonBlocking,
-            );
-          }
-          elwt.exit();
-        }
-      });
+      let _ = event_loop.run_app(&mut handler);
     }
   }
 

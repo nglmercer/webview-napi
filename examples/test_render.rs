@@ -12,7 +12,7 @@ fn main() {
   // evitando el "Error 71 Protocol Error" sin que el usuario configure nada.
   #[cfg(target_os = "linux")]
   {
-    env::set_var("GDK_BACKEND", "x11");
+    env::set_var("GDK_BACKEND", "wayland");
   }
 
   let event_loop = EventLoop::new().unwrap();

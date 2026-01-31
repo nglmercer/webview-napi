@@ -557,6 +557,8 @@ impl WebViewBuilder {
       inner: Some(webview_inner),
       label,
       ipc_listeners,
+      #[cfg(target_os = "linux")]
+      gtk_window: None,
     })
   }
 
@@ -574,13 +576,17 @@ impl WebViewBuilder {
     // Detect platform information
     let platform_info = platform_info();
 
-    // On Wayland, use wry's own window creation capabilities with GTK
+    // On Linux (both Wayland and X11), use wry's own window creation capabilities with GTK
+    // This ensures proper webview rendering by using the native GTK backend
     #[cfg(target_os = "linux")]
-    if platform_info.is_wayland() {
-      return self.build_gtk_wayland(label, ipc_listeners_override);
+    {
+      println!("Building WebView on Linux using GTK...");
+      return self.build_gtk(label, ipc_listeners_override);
     }
 
-    // On X11 and other platforms, create a winit window and build the webview on it
+    // On non-Linux platforms, create a winit window and build the webview on it
+    println!("Building WebView on {:?} using winit...", platform_info.display_server);
+
     // Create a window builder with the attributes from the webview builder
     let mut window_builder = WindowBuilder::new()?;
 
@@ -624,9 +630,10 @@ impl WebViewBuilder {
     self.build_on_window(&window, label, ipc_listeners_override)
   }
 
-  /// Builds the webview on Wayland using GTK.
+  /// Builds the webview on Linux using GTK.
+  /// This works for both X11 and Wayland display servers.
   #[cfg(target_os = "linux")]
-  fn build_gtk_wayland(
+  fn build_gtk(
     &mut self,
     label: String,
     ipc_listeners_override: Option<Arc<Mutex<Vec<IpcHandler>>>>,
@@ -634,15 +641,29 @@ impl WebViewBuilder {
     use gtk::prelude::*;
     use wry::WebViewBuilderExtUnix;
 
-    // Create a GTK window
+    println!("Starting GTK webview build...");
+
+    // Ensure GTK is initialized
+    if !gtk::is_initialized() {
+      println!("GTK not initialized, attempting to initialize...");
+      gtk::init().map_err(|e| {
+        napi::Error::new(
+          napi::Status::GenericFailure,
+          format!("Failed to initialize GTK: {}", e),
+        )
+      })?;
+    }
+    println!("GTK is initialized");
+
+    // Create a GTK window with proper container for webview
     let gtk_window = gtk::ApplicationWindow::builder()
       .title(self.attributes.title.as_deref().unwrap_or("WebView"))
       .default_width(self.attributes.width as i32)
       .default_height(self.attributes.height as i32)
       .resizable(self.attributes.resizable)
       .decorated(self.attributes.decorations)
-      .visible(self.attributes.visible)
       .build();
+    println!("GTK window created");
 
     // Set window properties
     if self.attributes.maximized {
@@ -651,6 +672,21 @@ impl WebViewBuilder {
     if !self.attributes.focused {
       gtk_window.set_focus_on_click(false);
     }
+
+    // Create a vertical box container to hold the webview
+    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    gtk_window.set_child(Some(&vbox));
+    println!("VBox container set as child");
+
+    // Make window visible BEFORE creating webview (needed for surface realization)
+    gtk_window.present();
+    println!("Window presented");
+
+    // Process GTK events to ensure window is realized
+    while gtk::events_pending() {
+      gtk::main_iteration_do(false);
+    }
+    println!("GTK events processed");
 
     // Create a webview builder
     let mut webview_builder = wry::WebViewBuilder::new();
@@ -673,8 +709,10 @@ impl WebViewBuilder {
 
     // Set URL or HTML
     if let Some(url) = &self.attributes.url {
+      println!("Setting URL: {}", url);
       webview_builder = webview_builder.with_url(url);
     } else if let Some(html) = &self.attributes.html {
+      println!("Setting HTML content ({} bytes)", html.len());
       webview_builder = webview_builder.with_html(html);
     }
 
@@ -703,20 +741,34 @@ impl WebViewBuilder {
     let ipc_listeners = listeners;
     let webview_builder = webview_builder_with_ipc;
 
+    println!("Building webview with GTK...");
     // Build the webview using GTK
-    let webview = webview_builder.build_gtk(&gtk_window).map_err(|e| {
+    let webview = webview_builder.build_gtk(&vbox).map_err(|e| {
       napi::Error::new(
         napi::Status::GenericFailure,
-        format!("Failed to create webview on Wayland: {}", e),
+        format!("Failed to create webview on Linux: {}", e),
       )
     })?;
+    println!("Webview built successfully");
+
+    // Process GTK events to ensure webview is realized
+    while gtk::events_pending() {
+      gtk::main_iteration_do(false);
+    }
+    println!("Final GTK events processed");
+
+    // Store the GTK window to keep it alive (prevent it from being dropped)
+    // We need to store this in the WebView struct to keep the window alive
+    let gtk_window_arc = std::sync::Arc::new(gtk_window);
 
     #[allow(clippy::arc_with_non_send_sync)]
     let webview_inner = Arc::new(Mutex::new(webview));
+    println!("Webview created successfully, returning");
     Ok(WebView {
       inner: Some(webview_inner),
       label,
       ipc_listeners,
+      gtk_window: Some(gtk_window_arc),
     })
   }
 }
@@ -728,6 +780,10 @@ pub struct WebView {
   pub(crate) inner: Option<Arc<Mutex<wry::WebView>>>,
   label: String,
   pub(crate) ipc_listeners: Arc<Mutex<Vec<IpcHandler>>>,
+  /// GTK window reference (Linux only) to keep the window alive
+  #[cfg(target_os = "linux")]
+  #[allow(dead_code)]
+  gtk_window: Option<std::sync::Arc<gtk::ApplicationWindow>>,
 }
 
 #[napi]

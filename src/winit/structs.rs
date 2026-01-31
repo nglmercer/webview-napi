@@ -18,7 +18,6 @@ use winit::platform::macos::WindowAttributesExtMacOS;
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowAttributesExtWindows;
 
-
 /// Forward declaration for MonitorInfo to avoid circular dependencies
 #[napi(object)]
 pub struct MonitorInfo {
@@ -407,7 +406,7 @@ impl EventLoop {
     if let Some(event_loop) = self.inner.take() {
       use winit::application::ApplicationHandler;
       use winit::event_loop::ActiveEventLoop;
-      
+
       struct SimpleAppHandler;
       impl ApplicationHandler for SimpleAppHandler {
         fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
@@ -422,13 +421,14 @@ impl EventLoop {
           }
         }
       }
-      
+
       let _ = event_loop.run_app(&mut SimpleAppHandler);
     }
     Ok(())
   }
 
   /// Helper function to emit a window event to the JavaScript handler
+  #[allow(dead_code)]
   fn emit_window_event(
     event_handler: &Arc<Mutex<Option<ThreadsafeFunction<WindowEventData>>>>,
     window_id: winit::window::WindowId,
@@ -461,18 +461,18 @@ impl EventLoop {
         target_os = "macos",
       ))]
       {
-        use winit::platform::pump_events::EventLoopExtPumpEvents;
         use winit::application::ApplicationHandler;
         use winit::event_loop::ActiveEventLoop;
-        
+        use winit::platform::pump_events::EventLoopExtPumpEvents;
+
         struct PumpAppHandler {
           event_handler: Arc<Mutex<Option<ThreadsafeFunction<WindowEventData>>>>,
           keep_running: bool,
         }
-        
+
         impl ApplicationHandler for PumpAppHandler {
           fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
-          
+
           fn window_event(
             &mut self,
             event_loop: &ActiveEventLoop,
@@ -482,7 +482,11 @@ impl EventLoop {
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
             match event {
               winit::event::WindowEvent::CloseRequested => {
-                Self::emit_window_event(&self.event_handler, window_id, WindowEvent::CloseRequested);
+                Self::emit_window_event(
+                  &self.event_handler,
+                  window_id,
+                  WindowEvent::CloseRequested,
+                );
                 self.keep_running = false;
                 event_loop.exit();
               }
@@ -519,7 +523,7 @@ impl EventLoop {
             }
           }
         }
-        
+
         impl PumpAppHandler {
           fn emit_window_event(
             event_handler: &Arc<Mutex<Option<ThreadsafeFunction<WindowEventData>>>>,
@@ -537,15 +541,15 @@ impl EventLoop {
             }
           }
         }
-        
+
         let mut handler = PumpAppHandler {
           event_handler: event_handler.clone(),
           keep_running: true,
         };
-        
+
         let status = event_loop.pump_app_events(None, &mut handler);
         keep_running = handler.keep_running;
-        
+
         if let winit::platform::pump_events::PumpStatus::Exit(_) = status {
           keep_running = false;
         }
@@ -579,7 +583,7 @@ impl EventLoop {
 /// Builder for creating event loops.
 #[napi]
 pub struct EventLoopBuilder {
-  inner: Option<winit::event_loop::EventLoopBuilder<()>>
+  inner: Option<winit::event_loop::EventLoopBuilder<()>>,
 }
 
 #[napi]
@@ -588,10 +592,9 @@ impl EventLoopBuilder {
   #[napi(constructor)]
   pub fn new() -> Result<Self> {
     Ok(Self {
-      inner: Some(winit::event_loop::EventLoop::builder())
+      inner: Some(winit::event_loop::EventLoop::builder()),
     })
   }
-
 
   /// Builds the event loop.
   #[napi]
@@ -1256,7 +1259,8 @@ impl WindowBuilder {
     if let Some(x) = self.attributes.x {
       if let Some(y) = self.attributes.y {
         if platform_info.supports_positioning {
-          window_attributes = window_attributes.with_position(winit::dpi::LogicalPosition::new(x, y));
+          window_attributes =
+            window_attributes.with_position(winit::dpi::LogicalPosition::new(x, y));
         } else {
           println!(
             "Warning: Window positioning is not supported on {:?}, ignoring position",
@@ -1266,7 +1270,8 @@ impl WindowBuilder {
       }
     }
 
-    // Build the window using create_window
+    // Build the window using create_window (using EventLoop method - still functional but deprecated)
+    #[allow(deprecated)]
     let window = el.create_window(window_attributes).map_err(|e| {
       napi::Error::new(
         napi::Status::GenericFailure,

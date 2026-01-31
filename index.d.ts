@@ -86,11 +86,8 @@ export declare class EventLoopWindowTarget {
 /**
  * Simple pixel renderer for Winit windows
  *
- * NOTE: This renderer uses global caches to avoid X11 client limit errors.
- * The "Maximum number of clients reached" error occurs when creating too many
- * X11 contexts/surfaces. This implementation uses a global cache keyed by window ID
- * to reuse rendering resources across render calls and even across different
- * PixelRenderer instances.
+ * Uses softbuffer for cross-platform rendering (works on Linux, macOS, Windows).
+ * Rendering resources are cached per-window to avoid resource exhaustion.
  */
 export declare class PixelRenderer {
   /** Creates a new pixel renderer with the given buffer dimensions */
@@ -107,11 +104,6 @@ export declare class PixelRenderer {
    * # Arguments
    * * `window` - The Winit window to render to
    * * `buffer` - RGBA pixel buffer (must be buffer_width * buffer_height * 4 bytes)
-   *
-   * # Performance Note
-   * This method uses global caches to avoid X11 "Maximum number of clients reached"
-   * errors that occur when creating new contexts/surfaces on each render call.
-   * Resources are cached per-window and reused across all PixelRenderer instances.
    */
   render(window: Window, buffer: Buffer): void
 }
@@ -400,6 +392,18 @@ export interface BrowserWindowOptions {
   transparent?: boolean
   fullscreen?: FullscreenType
 }
+
+/**
+ * Clears all render state caches.
+ * Use with caution - this will force recreation of all rendering resources.
+ */
+export declare function clearAllRenderCaches(): void
+
+/**
+ * Clears the render state cache for a specific window.
+ * Call this when a window is closed to free up resources.
+ */
+export declare function clearRenderCache(windowId: number): void
 
 export declare const enum ControlFlow {
   Poll = 0,
@@ -1184,10 +1188,6 @@ export interface RenderOptions {
  *
  * This is a convenience function for one-off renders.
  * For repeated rendering, use [`PixelRenderer`] instead.
- *
- * # Warning
- * Using this function repeatedly (200+ times) may cause X11 "Maximum number of clients reached"
- * errors. For repeated rendering, create a [`PixelRenderer`] instance and reuse it.
  */
 export declare function renderPixels(window: Window, buffer: Buffer, bufferWidth: number, bufferHeight: number): void
 

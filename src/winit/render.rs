@@ -36,6 +36,7 @@ impl Default for RenderOptions {
 
 /// Per-window rendering state using softbuffer
 struct RenderState {
+  #[allow(dead_code)]
   context: softbuffer::Context<&'static winit::window::Window>,
   surface: softbuffer::Surface<&'static winit::window::Window, &'static winit::window::Window>,
   last_window_width: u32,
@@ -46,7 +47,9 @@ struct RenderState {
 /// The key is the window ID (hashed to u64).
 static RENDER_STATE_CACHE: std::sync::LazyLock<
   std::sync::Mutex<RefCell<std::collections::HashMap<u64, RenderState>>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(RefCell::new(std::collections::HashMap::new())));
+> = std::sync::LazyLock::new(|| {
+  std::sync::Mutex::new(RefCell::new(std::collections::HashMap::new()))
+});
 
 /// Simple pixel renderer for Winit windows
 ///
@@ -172,7 +175,8 @@ impl PixelRenderer {
       // 1. The window is guaranteed to be alive during rendering
       // 2. We clean up the cache when the window is destroyed
       // 3. The window_id is unique per window instance
-      let window_ref: &'static winit::window::Window = unsafe { std::mem::transmute(&*window_guard) };
+      let window_ref: &'static winit::window::Window =
+        unsafe { std::mem::transmute(&*window_guard) };
 
       let context = softbuffer::Context::new(window_ref).map_err(|e| {
         napi::Error::new(
@@ -209,7 +213,8 @@ impl PixelRenderer {
     })?;
 
     // Check if window was resized and we need to recreate the surface
-    let needs_resize = state.last_window_width != window_width || state.last_window_height != window_height;
+    let needs_resize =
+      state.last_window_width != window_width || state.last_window_height != window_height;
 
     if needs_resize {
       // Drop the current state and recreate
@@ -217,7 +222,8 @@ impl PixelRenderer {
       cache.borrow_mut().remove(&window_id_u64);
 
       // Recreate with new dimensions
-      let window_ref: &'static winit::window::Window = unsafe { std::mem::transmute(&*window_guard) };
+      let window_ref: &'static winit::window::Window =
+        unsafe { std::mem::transmute(&*window_guard) };
 
       let context = softbuffer::Context::new(window_ref).map_err(|e| {
         napi::Error::new(
@@ -313,10 +319,24 @@ impl PixelRenderer {
     // Copy source buffer with scaling (RGBA to ARGB conversion)
     match self.scale_mode {
       ScaleMode::Stretch => {
-        copy_buffer_stretch(surface_buffer, buffer, self.buffer_width, self.buffer_height, window_width, window_height);
+        copy_buffer_stretch(
+          surface_buffer,
+          buffer,
+          self.buffer_width,
+          self.buffer_height,
+          window_width,
+          window_height,
+        );
       }
       ScaleMode::None => {
-        copy_buffer_centered(surface_buffer, buffer, self.buffer_width, self.buffer_height, window_width, window_height);
+        copy_buffer_centered(
+          surface_buffer,
+          buffer,
+          self.buffer_width,
+          self.buffer_height,
+          window_width,
+          window_height,
+        );
       }
       _ => {
         copy_buffer_scaled(
@@ -474,11 +494,7 @@ fn copy_buffer_centered(
 }
 
 /// Copies buffer with scaling (RGBA to ARGB conversion)
-fn copy_buffer_scaled(
-  surface_buffer: &mut [u32],
-  buffer: &[u8],
-  params: CopyBufferParams,
-) {
+fn copy_buffer_scaled(surface_buffer: &mut [u32], buffer: &[u8], params: CopyBufferParams) {
   let CopyBufferParams {
     buffer_width,
     buffer_height,
@@ -543,9 +559,9 @@ pub fn render_pixels(
 /// Clears the render state cache for a specific window.
 /// Call this when a window is closed to free up resources.
 #[napi]
-pub fn clear_render_cache(window_id: u64) {
+pub fn clear_render_cache(window_id: i64) {
   if let Ok(cache) = RENDER_STATE_CACHE.lock() {
-    cache.borrow_mut().remove(&window_id);
+    cache.borrow_mut().remove(&(window_id as u64));
   }
 }
 

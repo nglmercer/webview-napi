@@ -263,10 +263,7 @@ impl Application {
     let _ = self.event_loop_proxy.send_event(());
   }
 
-  fn process_pending_items(
-    &self,
-    event_loop_target: &winit::event_loop::ActiveEventLoop,
-  ) {
+  fn process_pending_items(&self, event_loop_target: &winit::event_loop::ActiveEventLoop) {
     let mut pending = self.windows_to_create.lock().unwrap();
     for (opts, win_handle, webviews_to_create) in pending.drain(..) {
       let window_level = if opts.always_on_top.unwrap_or(false) {
@@ -314,7 +311,8 @@ impl Application {
 
       if let Some(x) = opts.x {
         if let Some(y) = opts.y {
-          window_attributes = window_attributes.with_position(winit::dpi::LogicalPosition::new(x, y));
+          window_attributes =
+            window_attributes.with_position(winit::dpi::LogicalPosition::new(x, y));
         }
       }
 
@@ -408,16 +406,16 @@ impl Application {
     if let Some(event_loop) = event_loop {
       use winit::application::ApplicationHandler;
       use winit::event_loop::ActiveEventLoop;
-      
+
       struct AppHandler {
         handler_clone: Arc<Mutex<Option<ThreadsafeFunction<ApplicationEvent>>>>,
         exit_requested: Arc<Mutex<bool>>,
-        app_ref: Arc<HighLevelApp>,
+        app_ref: Arc<Application>,
       }
-      
+
       impl ApplicationHandler for AppHandler {
         fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
-        
+
         fn window_event(
           &mut self,
           event_loop: &ActiveEventLoop,
@@ -452,12 +450,12 @@ impl Application {
           }
         }
       }
-      
+
       let handler_clone = self.handler.clone();
       let exit_requested = self.exit_requested.clone();
       #[allow(clippy::arc_with_non_send_sync)]
       let app_ref = Arc::new(self.clone_internal());
-      
+
       let mut handler = AppHandler {
         handler_clone,
         exit_requested,
@@ -486,52 +484,73 @@ impl Application {
     if let Some(event_loop) = event_loop_lock.as_mut() {
       use winit::platform::pump_events::EventLoopExtPumpEvents;
 
+      if *self.exit_requested.lock().unwrap() {
+        return false;
+      }
+
+      struct PumpAppHandler {
+        handler_clone: Arc<Mutex<Option<ThreadsafeFunction<ApplicationEvent>>>>,
+        #[allow(dead_code)]
+        exit_requested: Arc<Mutex<bool>>,
+        app_ref: Arc<Application>,
+        keep_running: bool,
+      }
+
+      impl winit::application::ApplicationHandler for PumpAppHandler {
+        fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
+
+        fn window_event(
+          &mut self,
+          event_loop: &winit::event_loop::ActiveEventLoop,
+          _window_id: winit::window::WindowId,
+          event: winit::event::WindowEvent,
+        ) {
+          #[cfg(target_os = "linux")]
+          while gtk::events_pending() {
+            gtk::main_iteration();
+          }
+
+          event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+
+          self.app_ref.process_pending_items(event_loop);
+
+          match event {
+            winit::event::WindowEvent::CloseRequested => {
+              let mut h = self.handler_clone.lock().unwrap();
+              if let Some(handler) = h.as_mut() {
+                let _ = handler.call(
+                  Ok(ApplicationEvent {
+                    event: WebviewApplicationEvent::WindowCloseRequested,
+                  }),
+                  ThreadsafeFunctionCallMode::NonBlocking,
+                );
+              }
+              self.keep_running = false;
+              event_loop.exit();
+            }
+            winit::event::WindowEvent::RedrawRequested => {
+              // Continue running
+            }
+            _ => {}
+          }
+        }
+      }
+
       let handler_clone = self.handler.clone();
       let exit_requested = self.exit_requested.clone();
       #[allow(clippy::arc_with_non_send_sync)]
       let app_ref = Arc::new(self.clone_internal());
 
-      if *exit_requested.lock().unwrap() {
-        return false;
-      }
+      let mut handler = PumpAppHandler {
+        handler_clone,
+        exit_requested,
+        app_ref,
+        keep_running: true,
+      };
 
-      let status = event_loop.pump_events(None, |event, elwt| {
-        #[cfg(target_os = "linux")]
-        while gtk::events_pending() {
-          gtk::main_iteration();
-        }
+      let status = event_loop.pump_app_events(None, &mut handler);
+      keep_running = handler.keep_running;
 
-        elwt.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-        app_ref.process_pending_items(elwt);
-
-        match event {
-          winit::event::Event::WindowEvent {
-            event: winit::event::WindowEvent::CloseRequested,
-            ..
-          } => {
-            let mut h = handler_clone.lock().unwrap();
-            if let Some(handler) = h.as_mut() {
-              let _ = handler.call(
-                Ok(ApplicationEvent {
-                  event: WebviewApplicationEvent::WindowCloseRequested,
-                }),
-                ThreadsafeFunctionCallMode::NonBlocking,
-              );
-            }
-            keep_running = false;
-            elwt.exit();
-          }
-          winit::event::Event::AboutToWait => {
-            // Continue running - don't exit here
-            // This event fires when all pending events have been processed
-            // and the event loop is about to wait for new events.
-            // We should NOT call elwt.exit() here as that would cause
-            // the event loop to return immediately after the first iteration.
-          }
-          _ => {}
-        }
-      });
       if let winit::platform::pump_events::PumpStatus::Exit(_) = status {
         keep_running = false;
       }

@@ -10,10 +10,6 @@ use std::sync::{Arc, Mutex};
 use crate::winit::structs::EventLoop;
 use crate::wry::enums::WryTheme;
 use crate::wry::types::Result;
-
-#[cfg(target_os = "linux")]
-// use gtk::prelude::*;
-
 /// An initialization script to be run when creating a webview.
 #[napi(object)]
 pub struct InitializationScript {
@@ -586,7 +582,7 @@ impl WebViewBuilder {
     {
       use std::sync::Once;
       static GTK_INIT: Once = Once::new();
-      
+
       GTK_INIT.call_once(|| {
         println!("Initializing GTK for WebView...");
         if let Err(e) = gtk::init() {
@@ -595,7 +591,7 @@ impl WebViewBuilder {
         }
         println!("GTK initialized successfully");
       });
-      
+
       if !gtk::is_initialized() {
         return Err(napi::Error::new(
           napi::Status::GenericFailure,
@@ -637,7 +633,8 @@ impl WebViewBuilder {
       window_attributes = window_attributes.with_name(&label, &label);
     }
 
-    // Build the window
+    // Build the window (using EventLoop method - still functional but deprecated)
+    #[allow(deprecated)]
     let window = el.create_window(window_attributes).map_err(|e| {
       napi::Error::new(
         napi::Status::GenericFailure,
@@ -802,7 +799,10 @@ impl WebView {
     if let Some(inner) = &self.inner {
       // reload() method not available in wry 0.48, use load_url with current URL
       // or evaluate_script with location.reload()
-      let _ = inner.lock().unwrap().evaluate_script("window.location.reload()");
+      let _ = inner
+        .lock()
+        .unwrap()
+        .evaluate_script("window.location.reload()");
     }
     Ok(())
   }

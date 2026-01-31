@@ -1,10 +1,12 @@
 // Autoplay
-import { Application } from "../index.js";
-const app = new Application();
-const window = app.createBrowserWindow();
+import { EventLoop, WebViewBuilder
+    //,WindowBuilder 
+} from "../index.js";
+const eventLoop = new EventLoop();
+//const window = new WindowBuilder().build(eventLoop)
 
-const webview = window.createWebview({
-    html: `<!DOCTYPE html>
+const webview = new WebViewBuilder()
+    .withHtml(`<!DOCTYPE html>
     <html>
         <head>
             <title>Webview</title>
@@ -16,18 +18,15 @@ const webview = window.createWebview({
             </video>
         </body>
     </html>
-    `,
-    preload: `window.onIpcMessage = function(data) {
-        const output = document.getElementById('output');
-        output.innerText = \`Server Sent A Message: \${data}\`;
-    }`
-});
-
+    `)
+    .build(eventLoop,'0')
+console.log(webview.id)
+/*
 //if (!webview.isDevtoolsOpen()) webview.openDevtools();
-
+eventLoop.run()
 // Now run the app with a polling loop to allow IPC callbacks to process
 const poll = () => {
-    if (app.runIteration()) {
+    if (eventLoop.runIteration()) {
         window.id;
         webview.id;
         setTimeout(poll, 10);
@@ -40,3 +39,4 @@ setInterval(() => {
 }, 1000);
 poll();
 //app.run();
+*/

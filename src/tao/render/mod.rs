@@ -10,10 +10,14 @@ use napi_derive::napi;
 use std::cell::RefCell;
 use std::sync::Mutex;
 
-// Debug logging macro
+// Debug logging macro - set to false to disable debug output
+const DEBUG_ENABLED: bool = false;
+
 macro_rules! debug_log {
     ($($arg:tt)*) => {
-        eprintln!("[PixelRenderer] {}", format!($($arg)*));
+        if DEBUG_ENABLED {
+            eprintln!("[PixelRenderer] {}", format!($($arg)*));
+        }
     };
 }
 

@@ -4,9 +4,6 @@
 //! Uses X11 via pixels crate (Wayland support removed).
 
 use crate::tao::enums::ScaleMode;
-use crate::tao::render::buffer_ops::{
-  copy_buffer_centered, copy_buffer_fill, copy_buffer_scaled, CopyBufferParams,
-};
 use crate::tao::render::scaling::calculate_scaled_dimensions;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -24,6 +21,8 @@ macro_rules! debug_log {
 #[cfg(target_os = "linux")]
 struct X11RenderState {
   pixels: pixels::Pixels<'static>,
+  last_window_width: u32,
+  last_window_height: u32,
 }
 
 /// Global cache for X11 rendering state to avoid "Maximum number of clients reached" errors.
@@ -213,10 +212,11 @@ impl PixelRenderer {
     };
 
     if needs_create {
-      // Create new pixels instance
+      // Create new pixels instance with window dimensions (not buffer dimensions)
+      // This ensures the pixel buffer matches the window size for proper scaling
       let surface_texture = pixels::SurfaceTexture::new(window_width, window_height, window);
-      let new_pixels = pixels::Pixels::new(self.buffer_width, self.buffer_height, surface_texture)
-        .map_err(|e| {
+      let new_pixels =
+        pixels::Pixels::new(window_width, window_height, surface_texture).map_err(|e| {
           napi::Error::new(
             napi::Status::GenericFailure,
             format!("Failed to create pixels: {:?}", e),
@@ -234,6 +234,8 @@ impl PixelRenderer {
         window_id,
         X11RenderState {
           pixels: static_pixels,
+          last_window_width: window_width,
+          last_window_height: window_height,
         },
       );
     }
@@ -247,41 +249,66 @@ impl PixelRenderer {
       )
     })?;
 
-    // Handle window resize if needed by checking frame buffer size
-    let needs_resize = {
-      let frame = state.pixels.frame_mut();
-      // The frame size is buffer_width * buffer_height * 4
-      // We need to check if the surface texture size matches window size
-      // Since we can't directly query surface_texture size in pixels 0.15,
-      // we recreate if the frame dimensions don't match expected
-      let expected_frame_len = (self.buffer_width * self.buffer_height * 4) as usize;
-      frame.len() != expected_frame_len
-    };
+    // Handle window resize if needed by comparing with cached window size
+    // Only resize when the window size actually changes to avoid lag
+    let needs_resize =
+      state.last_window_width != window_width || state.last_window_height != window_height;
 
-    // If resize is needed, remove and recreate
     if needs_resize {
-      drop(cache_mut);
-      cache.borrow_mut().remove(&window_id);
-
-      // Recreate
-      let surface_texture = pixels::SurfaceTexture::new(window_width, window_height, window);
-      let new_pixels = pixels::Pixels::new(self.buffer_width, self.buffer_height, surface_texture)
-        .map_err(|e| {
-          napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to create pixels: {:?}", e),
-          )
-        })?;
-
-      let static_pixels: pixels::Pixels<'static> = unsafe { std::mem::transmute(new_pixels) };
-
-      cache.borrow_mut().insert(
-        window_id,
-        X11RenderState {
-          pixels: static_pixels,
-        },
+      debug_log!(
+        "  window resized: {}x{} -> {}x{}",
+        state.last_window_width,
+        state.last_window_height,
+        window_width,
+        window_height
       );
-      cache_mut = cache.borrow_mut();
+
+      // Try to resize the surface texture to match the new window size
+      if let Err(e) = state.pixels.resize_surface(window_width, window_height) {
+        debug_log!(
+          "  resize_surface failed: {:?}, recreating pixels instance",
+          e
+        );
+        // If resize fails, fall back to recreating
+        drop(cache_mut);
+        cache.borrow_mut().remove(&window_id);
+
+        // Recreate
+        let surface_texture = pixels::SurfaceTexture::new(window_width, window_height, window);
+        let new_pixels = pixels::Pixels::new(window_width, window_height, surface_texture)
+          .map_err(|e| {
+            napi::Error::new(
+              napi::Status::GenericFailure,
+              format!("Failed to create pixels: {:?}", e),
+            )
+          })?;
+
+        let static_pixels: pixels::Pixels<'static> = unsafe { std::mem::transmute(new_pixels) };
+
+        cache.borrow_mut().insert(
+          window_id,
+          X11RenderState {
+            pixels: static_pixels,
+            last_window_width: window_width,
+            last_window_height: window_height,
+          },
+        );
+        cache_mut = cache.borrow_mut();
+      } else {
+        // Also resize the pixel buffer to match window dimensions
+        if let Err(e) = state.pixels.resize_buffer(window_width, window_height) {
+          debug_log!("  resize_buffer failed: {:?}", e);
+        }
+
+        // Update cached window size
+        state.last_window_width = window_width;
+        state.last_window_height = window_height;
+        debug_log!(
+          "  resized surface and buffer to {}x{}",
+          window_width,
+          window_height
+        );
+      }
     }
 
     let state = cache_mut.get_mut(&window_id).ok_or_else(|| {
@@ -321,7 +348,7 @@ impl PixelRenderer {
     debug_log!(
       "  frame.len()={}, expected={}",
       frame.len(),
-      self.buffer_width * self.buffer_height * 4
+      window_width * window_height * 4
     );
 
     // Clear with background color first
@@ -330,14 +357,23 @@ impl PixelRenderer {
     }
 
     // Copy source buffer with scaling
+    // The frame buffer is sized to window_width x window_height
+    // We need to scale the source buffer to fit properly
     match self.scale_mode {
       ScaleMode::Stretch => {
-        // Direct copy - pixels crate handles the stretch
-        frame.copy_from_slice(buffer);
+        // Stretch mode: scale entire buffer to fill window
+        scale_buffer_nearest_neighbor(
+          frame,
+          buffer,
+          self.buffer_width,
+          self.buffer_height,
+          window_width,
+          window_height,
+        );
       }
       ScaleMode::None => {
-        // Center without scaling
-        copy_buffer_centered(
+        // Center without scaling, crop if buffer is larger than window
+        copy_buffer_centered_crop(
           frame,
           buffer,
           self.buffer_width,
@@ -347,8 +383,8 @@ impl PixelRenderer {
         );
       }
       ScaleMode::Fill => {
-        // Fill mode: scale to fill entire window, cropping if necessary
-        copy_buffer_fill(
+        // Fill mode: scale buffer maintaining aspect ratio to fill window
+        scale_buffer_fill(
           frame,
           buffer,
           self.buffer_width,
@@ -358,11 +394,11 @@ impl PixelRenderer {
         );
       }
       _ => {
-        // Fit, Integer - copy with calculated dimensions
-        copy_buffer_scaled(
+        // Fit, Integer - scale buffer maintaining aspect ratio to fit within window
+        scale_buffer_fit(
           frame,
           buffer,
-          CopyBufferParams {
+          ScaleBufferFitParams {
             buffer_width: self.buffer_width,
             buffer_height: self.buffer_height,
             window_width,
@@ -425,3 +461,154 @@ pub fn render_pixels(
 
 pub mod buffer_ops;
 pub mod scaling;
+
+/// Scales buffer to fill the entire window using nearest neighbor
+fn scale_buffer_nearest_neighbor(
+  frame: &mut [u8],
+  buffer: &[u8],
+  buffer_width: u32,
+  buffer_height: u32,
+  window_width: u32,
+  window_height: u32,
+) {
+  for y in 0..window_height {
+    for x in 0..window_width {
+      let src_x = (x as f32 * buffer_width as f32 / window_width as f32)
+        .min(buffer_width as f32 - 1.0) as u32;
+      let src_y = (y as f32 * buffer_height as f32 / window_height as f32)
+        .min(buffer_height as f32 - 1.0) as u32;
+
+      let src_idx = ((src_y * buffer_width + src_x) * 4) as usize;
+      let dst_idx = ((y * window_width + x) * 4) as usize;
+
+      if src_idx + 4 <= buffer.len() && dst_idx + 4 <= frame.len() {
+        frame[dst_idx..dst_idx + 4].copy_from_slice(&buffer[src_idx..src_idx + 4]);
+      }
+    }
+  }
+}
+
+/// Centers buffer without scaling, cropping if necessary
+fn copy_buffer_centered_crop(
+  frame: &mut [u8],
+  buffer: &[u8],
+  buffer_width: u32,
+  buffer_height: u32,
+  window_width: u32,
+  window_height: u32,
+) {
+  let crop_x = buffer_width.saturating_sub(window_width) / 2;
+  let crop_y = buffer_height.saturating_sub(window_height) / 2;
+  let copy_width = buffer_width.min(window_width);
+  let copy_height = buffer_height.min(window_height);
+  let start_x = (window_width.saturating_sub(buffer_width)) / 2;
+  let start_y = (window_height.saturating_sub(buffer_height)) / 2;
+
+  for y in 0..copy_height {
+    for x in 0..copy_width {
+      let src_x = crop_x + x;
+      let src_y = crop_y + y;
+      let dst_x = start_x + x;
+      let dst_y = start_y + y;
+
+      let src_idx = ((src_y * buffer_width + src_x) * 4) as usize;
+      let dst_idx = ((dst_y * window_width + dst_x) * 4) as usize;
+
+      if src_idx + 4 <= buffer.len() && dst_idx + 4 <= frame.len() {
+        frame[dst_idx..dst_idx + 4].copy_from_slice(&buffer[src_idx..src_idx + 4]);
+      }
+    }
+  }
+}
+
+/// Scales buffer to fill window, maintaining aspect ratio by cropping
+fn scale_buffer_fill(
+  frame: &mut [u8],
+  buffer: &[u8],
+  buffer_width: u32,
+  buffer_height: u32,
+  window_width: u32,
+  window_height: u32,
+) {
+  let buffer_aspect = buffer_width as f32 / buffer_height as f32;
+  let window_aspect = window_width as f32 / window_height as f32;
+
+  let (crop_x, crop_y, crop_width, crop_height) = if buffer_aspect > window_aspect {
+    let new_width = (buffer_height as f32 * window_aspect) as u32;
+    ((buffer_width - new_width) / 2, 0, new_width, buffer_height)
+  } else {
+    let new_height = (buffer_width as f32 / window_aspect) as u32;
+    (
+      0,
+      (buffer_height - new_height) / 2,
+      buffer_width,
+      new_height,
+    )
+  };
+
+  for y in 0..window_height {
+    for x in 0..window_width {
+      let src_x = crop_x
+        + (x as f32 * crop_width as f32 / window_width as f32).min(crop_width as f32 - 1.0) as u32;
+      let src_y = crop_y
+        + (y as f32 * crop_height as f32 / window_height as f32).min(crop_height as f32 - 1.0)
+          as u32;
+
+      let src_idx = ((src_y * buffer_width + src_x) * 4) as usize;
+      let dst_idx = ((y * window_width + x) * 4) as usize;
+
+      if src_idx + 4 <= buffer.len() && dst_idx + 4 <= frame.len() {
+        frame[dst_idx..dst_idx + 4].copy_from_slice(&buffer[src_idx..src_idx + 4]);
+      }
+    }
+  }
+}
+
+/// Parameters for scaling buffer to fit window
+struct ScaleBufferFitParams {
+  buffer_width: u32,
+  buffer_height: u32,
+  window_width: u32,
+  window_height: u32,
+  offset_x: u32,
+  offset_y: u32,
+  scaled_width: u32,
+  scaled_height: u32,
+}
+
+/// Scales buffer to fit window, maintaining aspect ratio with letterboxing
+fn scale_buffer_fit(frame: &mut [u8], buffer: &[u8], params: ScaleBufferFitParams) {
+  let ScaleBufferFitParams {
+    buffer_width,
+    buffer_height,
+    window_width,
+    window_height,
+    offset_x,
+    offset_y,
+    scaled_width,
+    scaled_height,
+  } = params;
+
+  // Frame is already cleared with background color
+
+  for y in 0..scaled_height {
+    for x in 0..scaled_width {
+      let src_x = (x as f32 * buffer_width as f32 / scaled_width as f32)
+        .min(buffer_width as f32 - 1.0) as u32;
+      let src_y = (y as f32 * buffer_height as f32 / scaled_height as f32)
+        .min(buffer_height as f32 - 1.0) as u32;
+
+      let dst_x = offset_x + x;
+      let dst_y = offset_y + y;
+
+      if dst_x < window_width && dst_y < window_height {
+        let src_idx = ((src_y * buffer_width + src_x) * 4) as usize;
+        let dst_idx = ((dst_y * window_width + dst_x) * 4) as usize;
+
+        if src_idx + 4 <= buffer.len() && dst_idx + 4 <= frame.len() {
+          frame[dst_idx..dst_idx + 4].copy_from_slice(&buffer[src_idx..src_idx + 4]);
+        }
+      }
+    }
+  }
+}

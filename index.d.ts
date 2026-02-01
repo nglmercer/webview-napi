@@ -66,11 +66,6 @@ export declare class EventLoopBuilder {
    * This must be called before build() to take effect.
    */
   withForceX11(force: boolean): this
-  /**
-   * Forces Wayland backend on Linux.
-   * This must be called before build() to take effect.
-   */
-  withForceWayland(force: boolean): this
   /** Builds the event loop. */
   build(): EventLoop
 }
@@ -1484,8 +1479,6 @@ export interface WindowAttributes {
   theme?: TaoTheme
   /** Whether to force X11 backend on Linux (default: auto-detect) */
   forceX11?: boolean
-  /** Whether to force Wayland backend on Linux (default: auto-detect) */
-  forceWayland?: boolean
 }
 
 /** Window drag details. */
@@ -1586,8 +1579,6 @@ export interface WindowOptions {
   theme?: TaoTheme
   /** Whether to force X11 backend on Linux (default: auto-detect) */
   forceX11?: boolean
-  /** Whether to force Wayland backend on Linux (default: auto-detect) */
-  forceWayland?: boolean
 }
 
 /** Window size limits. */

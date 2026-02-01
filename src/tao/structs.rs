@@ -4,7 +4,6 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use std::env;
 use std::sync::{Arc, Mutex};
 
 use crate::tao::enums::{
@@ -98,10 +97,6 @@ pub struct WindowOptions {
   pub icon: Option<Buffer>,
   /// The theme of window.
   pub theme: Option<TaoTheme>,
-  /// Whether to force X11 backend on Linux (default: auto-detect)
-  pub force_x11: Option<bool>,
-  /// Whether to force Wayland backend on Linux (default: auto-detect)
-  pub force_wayland: Option<bool>,
 }
 
 /// Window size limits.
@@ -315,10 +310,6 @@ pub struct WindowAttributes {
   pub icon: Option<Buffer>,
   /// The theme of window.
   pub theme: Option<TaoTheme>,
-  /// Whether to force X11 backend on Linux (default: auto-detect)
-  pub force_x11: Option<bool>,
-  /// Whether to force Wayland backend on Linux (default: auto-detect)
-  pub force_wayland: Option<bool>,
 }
 
 /// Progress bar data from Tao.
@@ -454,8 +445,6 @@ impl EventLoop {
 #[napi]
 pub struct EventLoopBuilder {
   inner: Option<tao::event_loop::EventLoopBuilder<()>>,
-  force_x11: Option<bool>,
-  force_wayland: Option<bool>,
 }
 
 #[napi]
@@ -465,25 +454,7 @@ impl EventLoopBuilder {
   pub fn new() -> Result<Self> {
     Ok(Self {
       inner: Some(tao::event_loop::EventLoopBuilder::new()),
-      force_x11: None,
-      force_wayland: None,
     })
-  }
-
-  /// Forces X11 backend on Linux.
-  /// This must be called before build() to take effect.
-  #[napi]
-  pub fn with_force_x11(&mut self, force: bool) -> Result<&Self> {
-    self.force_x11 = Some(force);
-    Ok(self)
-  }
-
-  /// Forces Wayland backend on Linux.
-  /// This must be called before build() to take effect.
-  #[napi]
-  pub fn with_force_wayland(&mut self, force: bool) -> Result<&Self> {
-    self.force_wayland = Some(force);
-    Ok(self)
   }
 
   /// Builds the event loop.
@@ -498,26 +469,6 @@ impl EventLoopBuilder {
       target_os = "netbsd",
       target_os = "openbsd"
     ))]
-    {
-      if self.force_x11 == Some(true) {
-        // Force X11 backend by clearing Wayland environment variables
-        std::env::remove_var("WAYLAND_DISPLAY");
-        // Ensure DISPLAY is set for X11
-        env::set_var("GDK_BACKEND", "x11");
-        if std::env::var("DISPLAY").is_err() {
-          std::env::set_var("DISPLAY", ":0");
-        }
-        println!(
-          "Forcing X11 backend: WAYLAND_DISPLAY cleared, DISPLAY={}",
-          std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string())
-        );
-      } else if self.force_wayland == Some(true) {
-        // Force Wayland backend
-        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
-        println!("Forcing Wayland backend: WAYLAND_DISPLAY=wayland-0");
-      }
-    }
-
     let event_loop = self
       .inner
       .take()
@@ -1000,8 +951,6 @@ impl WindowBuilder {
         menubar: true,
         icon: None,
         theme: None,
-        force_x11: None,
-        force_wayland: None,
       },
       inner: None,
     })
@@ -1100,20 +1049,6 @@ impl WindowBuilder {
     Ok(self)
   }
 
-  /// Forces X11 backend on Linux.
-  #[napi]
-  pub fn with_force_x11(&mut self, force: bool) -> Result<&Self> {
-    self.attributes.force_x11 = Some(force);
-    Ok(self)
-  }
-
-  /// Forces Wayland backend on Linux.
-  #[napi]
-  pub fn with_force_wayland(&mut self, force: bool) -> Result<&Self> {
-    self.attributes.force_wayland = Some(force);
-    Ok(self)
-  }
-
   /// Builds the window.
   #[napi]
   pub fn build(&mut self, event_loop: &EventLoop) -> Result<Window> {
@@ -1132,11 +1067,6 @@ impl WindowBuilder {
       "Building window with transparency: {}, platform: {:?}",
       self.attributes.transparent, platform_info.display_server
     );
-
-    // Warn about positioning on Wayland
-    if platform_info.is_wayland() && (self.attributes.x.is_some() || self.attributes.y.is_some()) {
-      println!("Warning: Window positioning is not supported on Wayland, ignoring position");
-    }
 
     let mut builder = tao::window::WindowBuilder::new()
       .with_title(&self.attributes.title)
@@ -1160,16 +1090,11 @@ impl WindowBuilder {
     {
       // Handle platform-specific transparency settings
       if self.attributes.transparent {
-        // Only enable RGBA visual on X11 or when forced
-        if platform_info.is_x11() || self.attributes.force_x11 == Some(true) {
+        // Only enable RGBA visual on X11
+        if platform_info.is_x11() {
           builder = builder.with_rgba_visual(true);
         }
-        // On Wayland, transparency is handled differently
-        // We don't set with_rgba_visual on Wayland as it's X11-specific
       }
-
-      // Backend selection is already handled before platform detection
-      // This block is kept for any additional platform-specific settings if needed
     }
 
     #[cfg(target_os = "macos")]
@@ -1192,17 +1117,10 @@ impl WindowBuilder {
       .with_maximized(self.attributes.maximized)
       .with_focused(self.attributes.focused);
 
-    // Set position if provided (only supported on X11, not Wayland)
+    // Set position if provided
     if let Some(x) = self.attributes.x {
       if let Some(y) = self.attributes.y {
-        if platform_info.supports_positioning {
-          builder = builder.with_position(tao::dpi::LogicalPosition::new(x, y));
-        } else {
-          println!(
-            "Warning: Window positioning is not supported on {:?}, ignoring position",
-            platform_info.display_server
-          );
-        }
+        builder = builder.with_position(tao::dpi::LogicalPosition::new(x, y));
       }
     }
 

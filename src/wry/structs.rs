@@ -8,7 +8,7 @@ use napi_derive::napi;
 use std::sync::{Arc, Mutex};
 
 use crate::tao::structs::EventLoop;
-use crate::wry::enums::{WryTheme, PageLoadEvent, ProxyConfig, BackgroundThrottlingPolicy};
+use crate::wry::enums::WryTheme;
 use crate::wry::types::Result;
 #[cfg(any(
   target_os = "linux",
@@ -26,6 +26,8 @@ use tao::platform::unix::WindowExtUnix;
   target_os = "openbsd"
 ))]
 use wry::WebViewBuilderExtUnix;
+#[cfg(target_os = "windows")]
+use wry::WebViewBuilderExtWindows;
 
 /// An initialization script to be run when creating a webview.
 #[napi(object)]
@@ -225,6 +227,13 @@ pub struct WebViewAttributes {
   pub autoplay: bool,
   /// Whether to enable back/forward navigation gestures.
   pub back_forward_navigation_gestures: bool,
+  /// Whether to enable web security (CORS, etc.).
+  /// When set to false, disables web security features like CORS.
+  /// WARNING: This is a security risk and should only be used for trusted content.
+  pub websecurity: bool,
+  /// Whether to run the webview unsandboxed.
+  /// WARNING: This is a security risk and should only be used for trusted content.
+  pub unsandboxed: bool,
 }
 
 pub type IpcHandler = ThreadsafeFunction<String>;
@@ -274,6 +283,8 @@ impl WebViewBuilder {
         clipboard: true,
         autoplay: true,
         back_forward_navigation_gestures: false,
+        websecurity: true,
+        unsandboxed: false,
       },
       ipc_handler: None,
       ipc_handlers: Vec::new(),
@@ -484,6 +495,23 @@ impl WebViewBuilder {
     Ok(self)
   }
 
+  /// Sets whether to enable web security (CORS, etc.).
+  /// When set to false, disables web security features like CORS.
+  /// WARNING: This is a security risk and should only be used for trusted content.
+  #[napi]
+  pub fn with_websecurity(&mut self, websecurity: bool) -> Result<&Self> {
+    self.attributes.websecurity = websecurity;
+    Ok(self)
+  }
+
+  /// Sets whether to run the webview unsandboxed.
+  /// WARNING: This is a security risk and should only be used for trusted content.
+  #[napi]
+  pub fn with_unsandboxed(&mut self, unsandboxed: bool) -> Result<&Self> {
+    self.attributes.unsandboxed = unsandboxed;
+    Ok(self)
+  }
+
   /// Sets the IPC handler for the webview.
   #[napi(ts_args_type = "callback: (error: Error | null, message: string) => void")]
   pub fn with_ipc_handler(&mut self, callback: IpcHandler) -> Result<&Self> {
@@ -567,17 +595,6 @@ impl WebViewBuilder {
 
 
 
-  /// Sets the webview to be unsandboxed.
-  /// WARNING: This is a security risk and should only be used for trusted content.
-  /// This allows the webview to access local files and resources without restrictions.
-  #[napi]
-  pub fn with_unsandboxed(&mut self, _unsandboxed: bool) -> Result<&Self> {
-    // Note: wry doesn't have a direct "unsandboxed" flag, but we can achieve
-    // similar functionality through custom protocols and other settings
-    // This is a marker for enhanced permissions
-    Ok(self)
-  }
-
   /// Adds multiple IPC handlers for the webview.
   #[napi]
   pub fn with_ipc_handlers(&mut self, handlers: Vec<IpcHandler>) -> Result<&Self> {
@@ -651,6 +668,17 @@ impl WebViewBuilder {
     webview_builder = webview_builder.with_clipboard(self.attributes.clipboard);
     webview_builder = webview_builder
       .with_back_forward_navigation_gestures(self.attributes.back_forward_navigation_gestures);
+
+    // Apply websecurity setting (Windows only via additional_browser_args)
+    #[cfg(target_os = "windows")]
+    {
+      if !self.attributes.websecurity {
+        webview_builder = webview_builder.with_additional_browser_args("--disable-web-security");
+      }
+      if self.attributes.unsandboxed {
+        webview_builder = webview_builder.with_additional_browser_args("--no-sandbox");
+      }
+    }
 
     // Apply initialization scripts
     for script in &self.attributes.initialization_scripts {
@@ -856,6 +884,17 @@ impl WebViewBuilder {
     webview_builder = webview_builder.with_clipboard(self.attributes.clipboard);
     webview_builder = webview_builder
       .with_back_forward_navigation_gestures(self.attributes.back_forward_navigation_gestures);
+
+    // Apply websecurity setting (Windows only via additional_browser_args)
+    #[cfg(target_os = "windows")]
+    {
+      if !self.attributes.websecurity {
+        webview_builder = webview_builder.with_additional_browser_args("--disable-web-security");
+      }
+      if self.attributes.unsandboxed {
+        webview_builder = webview_builder.with_additional_browser_args("--no-sandbox");
+      }
+    }
 
     // Apply initialization scripts
     for script in &self.attributes.initialization_scripts {

@@ -288,14 +288,19 @@ export declare class WebViewBuilder {
   withAutoplay(autoplay: boolean): this
   /** Sets whether to enable back/forward navigation gestures. */
   withBackForwardNavigationGestures(backForwardNavigationGestures: boolean): this
+  /**
+   * Sets whether to enable web security (CORS, etc.).
+   * When set to false, disables web security features like CORS.
+   * WARNING: This is a security risk and should only be used for trusted content.
+   */
+  withWebsecurity(websecurity: boolean): this
+  /**
+   * Sets whether to run the webview unsandboxed.
+   * WARNING: This is a security risk and should only be used for trusted content.
+   */
+  withUnsandboxed(unsandboxed: boolean): this
   /** Sets the IPC handler for the webview. */
   withIpcHandler(callback: (error: Error | null, message: string) => void): this
-  /**
-   * Sets a custom protocol handler for the webview.
-   * This allows you to handle custom URL schemes (like "myapp://").
-   * The handler receives the request and should return a response.
-   */
-  withCustomProtocol(scheme: string, handler: (error: Error | null, request: RequestAsyncResponder) => Buffer | Uint8Array | ArrayBuffer): this
   /**
    * Loads HTML content from a file with proper context resolution.
    * This sets the base URL so that relative imports (like ./styles.css, ./main.js)
@@ -308,61 +313,6 @@ export declare class WebViewBuilder {
    * to resolve correctly against the provided base URL.
    */
   withHtmlAndBaseUrl(html: string, baseUrl: string): this
-  /**
-   * Sets a URL with custom headers to be loaded when the webview is created.
-   * This is an advanced/"unsafe" method that gives you more control over the request.
-   */
-  withUrlAndHeaders(url: string, headers: Array<[string, string]>): this
-  /**
-   * Sets the webview to be unsandboxed.
-   * WARNING: This is a security risk and should only be used for trusted content.
-   * This allows the webview to access local files and resources without restrictions.
-   */
-  withUnsandboxed(unsandboxed: boolean): this
-  /**
-   * Enables or disables JavaScript in the webview.
-   * Disabling JavaScript can improve security for static content.
-   */
-  withJavascriptDisabled(disabled: boolean): this
-  /**
-   * Sets a navigation handler that can intercept and control navigation requests.
-   * The handler should return true to allow the navigation, false to block it.
-   */
-  withNavigationHandler(handler: (error: Error | null, url: string) => boolean): this
-  /**
-   * Sets a handler for new window requests.
-   * This controls what happens when a page tries to open a new window.
-   */
-  withNewWindowHandler(handler: (error: Error | null, features: NewWindowFeatures) => NewWindowResponse): this
-  /**
-   * Sets a handler for page load events.
-   * This allows you to monitor when pages start and finish loading.
-   */
-  withPageLoadHandler(handler: (error: Error | null, event: PageLoadEvent, url: string) => void): this
-  /** Sets a handler for document title changes. */
-  withTitleChangeHandler(handler: (error: Error | null, title: string) => void): this
-  /**
-   * Sets a download started handler.
-   * This is called when a download starts and allows you to control the download.
-   */
-  withDownloadStartedHandler(handler: (error: Error | null, url: string, filename: string) => boolean): this
-  /**
-   * Sets a download completed handler.
-   * This is called when a download completes.
-   */
-  withDownloadCompletedHandler(handler: (error: Error | null, url: string, filename: string, success: boolean) => void): this
-  /** Sets the proxy configuration for the webview. */
-  withProxyConfig(config: ProxyConfig): this
-  /**
-   * Sets the background throttling policy.
-   * This controls how the webview behaves when it's in the background.
-   */
-  withBackgroundThrottling(policy: BackgroundThrottlingPolicy): this
-  /**
-   * Sets whether the webview accepts the first mouse click.
-   * When true, the first click on an unfocused webview will be processed.
-   */
-  withAcceptFirstMouse(accept: boolean): this
   /** Adds multiple IPC handlers for the webview. */
   withIpcHandlers(handlers: Array<IpcHandler>): this
   /** Builds the webview on an existing window. */
@@ -1558,6 +1508,17 @@ export interface WebViewAttributes {
   autoplay: boolean
   /** Whether to enable back/forward navigation gestures. */
   backForwardNavigationGestures: boolean
+  /**
+   * Whether to enable web security (CORS, etc.).
+   * When set to false, disables web security features like CORS.
+   * WARNING: This is a security risk and should only be used for trusted content.
+   */
+  websecurity: boolean
+  /**
+   * Whether to run the webview unsandboxed.
+   * WARNING: This is a security risk and should only be used for trusted content.
+   */
+  unsandboxed: boolean
 }
 
 /** Webview icon data. */

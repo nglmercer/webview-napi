@@ -593,8 +593,6 @@ impl WebViewBuilder {
     Ok(self)
   }
 
-
-
   /// Adds multiple IPC handlers for the webview.
   #[napi]
   pub fn with_ipc_handlers(&mut self, handlers: Vec<IpcHandler>) -> Result<&Self> {
@@ -1171,8 +1169,8 @@ impl WebView {
   /// This is an "unsafe" method that gives you more control over the request.
   #[napi]
   pub fn load_url_with_headers(&self, url: String, headers: Vec<(String, String)>) -> Result<()> {
-    use wry::http::header::{HeaderMap, HeaderName, HeaderValue};
     use std::str::FromStr;
+    use wry::http::header::{HeaderMap, HeaderName, HeaderValue};
 
     let mut header_map = HeaderMap::new();
     for (key, value) in headers {
@@ -1182,7 +1180,10 @@ impl WebView {
     }
 
     if let Some(inner) = &self.inner {
-      let _ = inner.lock().unwrap().load_url_with_headers(&url, header_map);
+      let _ = inner
+        .lock()
+        .unwrap()
+        .load_url_with_headers(&url, header_map);
     }
     Ok(())
   }
@@ -1190,17 +1191,23 @@ impl WebView {
   /// Evaluates JavaScript code with a callback for the result.
   /// This is an "unsafe" method that gives you more control.
   #[napi(ts_args_type = "js: string, callback: (error: Error | null, result: string) => void")]
-  pub fn evaluate_script_with_callback(&self, js: String, callback: ThreadsafeFunction<String>) -> Result<()> {
+  pub fn evaluate_script_with_callback(
+    &self,
+    js: String,
+    callback: ThreadsafeFunction<String>,
+  ) -> Result<()> {
     if let Some(inner) = &self.inner {
       let guard = inner.lock().unwrap();
-      guard.evaluate_script_with_callback(&js, move |result: String| {
-        let _ = callback.call(Ok(result), ThreadsafeFunctionCallMode::NonBlocking);
-      }).map_err(|e| {
-        napi::Error::new(
-          napi::Status::GenericFailure,
-          format!("Failed to evaluate script with callback: {:?}", e),
-        )
-      })?;
+      guard
+        .evaluate_script_with_callback(&js, move |result: String| {
+          let _ = callback.call(Ok(result), ThreadsafeFunctionCallMode::NonBlocking);
+        })
+        .map_err(|e| {
+          napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to evaluate script with callback: {:?}", e),
+          )
+        })?;
     }
     Ok(())
   }
@@ -1210,12 +1217,16 @@ impl WebView {
   #[napi]
   pub fn clear_all_browsing_data(&self) -> Result<()> {
     if let Some(inner) = &self.inner {
-      inner.lock().unwrap().clear_all_browsing_data().map_err(|e| {
-        napi::Error::new(
-          napi::Status::GenericFailure,
-          format!("Failed to clear browsing data: {:?}", e),
-        )
-      })?;
+      inner
+        .lock()
+        .unwrap()
+        .clear_all_browsing_data()
+        .map_err(|e| {
+          napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to clear browsing data: {:?}", e),
+          )
+        })?;
     }
     Ok(())
   }
@@ -1223,7 +1234,13 @@ impl WebView {
   /// Sets a cookie for the webview.
   /// This is an advanced method for better control over cookies.
   #[napi]
-  pub fn set_cookie(&self, name: String, value: String, domain: Option<String>, path: Option<String>) -> Result<()> {
+  pub fn set_cookie(
+    &self,
+    name: String,
+    value: String,
+    domain: Option<String>,
+    path: Option<String>,
+  ) -> Result<()> {
     use wry::cookie::{Cookie, SameSite};
 
     let mut cookie_builder = Cookie::build((name, value));
@@ -1258,12 +1275,15 @@ impl WebView {
         )
       })?;
 
-      let cookie_infos: Vec<CookieInfo> = cookies.into_iter().map(|c| CookieInfo {
-        name: c.name().to_string(),
-        value: c.value().to_string(),
-        domain: c.domain().map(|d| d.to_string()),
-        path: c.path().map(|p| p.to_string()),
-      }).collect();
+      let cookie_infos: Vec<CookieInfo> = cookies
+        .into_iter()
+        .map(|c| CookieInfo {
+          name: c.name().to_string(),
+          value: c.value().to_string(),
+          domain: c.domain().map(|d| d.to_string()),
+          path: c.path().map(|p| p.to_string()),
+        })
+        .collect();
 
       Ok(cookie_infos)
     } else {
@@ -1282,12 +1302,15 @@ impl WebView {
         )
       })?;
 
-      let cookie_infos: Vec<CookieInfo> = cookies.into_iter().map(|c| CookieInfo {
-        name: c.name().to_string(),
-        value: c.value().to_string(),
-        domain: c.domain().map(|d| d.to_string()),
-        path: c.path().map(|p| p.to_string()),
-      }).collect();
+      let cookie_infos: Vec<CookieInfo> = cookies
+        .into_iter()
+        .map(|c| CookieInfo {
+          name: c.name().to_string(),
+          value: c.value().to_string(),
+          domain: c.domain().map(|d| d.to_string()),
+          path: c.path().map(|p| p.to_string()),
+        })
+        .collect();
 
       Ok(cookie_infos)
     } else {
@@ -1297,7 +1320,13 @@ impl WebView {
 
   /// Deletes a cookie.
   #[napi]
-  pub fn delete_cookie(&self, name: String, value: String, domain: Option<String>, path: Option<String>) -> Result<()> {
+  pub fn delete_cookie(
+    &self,
+    name: String,
+    value: String,
+    domain: Option<String>,
+    path: Option<String>,
+  ) -> Result<()> {
     use wry::cookie::{Cookie, SameSite};
 
     let mut cookie_builder = Cookie::build((name, value));
@@ -1355,11 +1384,11 @@ impl WebView {
       })?;
       let (x, y) = match b.position {
         tao::dpi::Position::Logical(pos) => (pos.x as i32, pos.y as i32),
-        tao::dpi::Position::Physical(pos) => (pos.x as i32, pos.y as i32),
+        tao::dpi::Position::Physical(pos) => (pos.x, pos.y),
       };
       let (width, height) = match b.size {
         tao::dpi::Size::Logical(size) => (size.width as u32, size.height as u32),
-        tao::dpi::Size::Physical(size) => (size.width as u32, size.height as u32),
+        tao::dpi::Size::Physical(size) => (size.width, size.height),
       };
       Ok(Rect {
         x,

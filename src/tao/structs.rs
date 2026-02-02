@@ -1,4 +1,3 @@
-
 //! Tao structs
 //!
 //! This module contains all structs from the tao crate.

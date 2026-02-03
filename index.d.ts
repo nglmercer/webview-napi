@@ -81,11 +81,9 @@ export declare class EventLoopWindowTarget {
 /**
  * Simple pixel renderer for Tao windows
  *
- * NOTE: This renderer uses global caches to avoid X11 client limit errors.
- * The "Maximum number of clients reached" error occurs when creating too many
- * X11 contexts/surfaces. This implementation uses a global cache keyed by window ID
- * to reuse rendering resources across render calls and even across different
- * PixelRenderer instances.
+ * NOTE: This renderer uses a global cache to avoid resource exhaustion errors
+ * that occur when creating too many contexts/surfaces on each render call.
+ * Resources are cached per-window and reused across all PixelRenderer instances.
  */
 export declare class PixelRenderer {
   /** Creates a new pixel renderer with the given buffer dimensions */
@@ -104,8 +102,8 @@ export declare class PixelRenderer {
    * * `buffer` - RGBA pixel buffer (must be buffer_width * buffer_height * 4 bytes)
    *
    * # Performance Note
-   * This method uses global caches to avoid X11 "Maximum number of clients reached"
-   * errors that occur when creating new contexts/surfaces on each render call.
+   * This method uses a global cache to avoid resource exhaustion errors
+   * that occur when creating new contexts/surfaces on each render call.
    * Resources are cached per-window and reused across all PixelRenderer instances.
    */
   render(window: Window, buffer: Buffer): void
@@ -1278,8 +1276,8 @@ export interface RenderOptions {
  * For repeated rendering, use [`PixelRenderer`] instead.
  *
  * # Warning
- * Using this function repeatedly (200+ times) may cause X11 "Maximum number of clients reached"
- * errors. For repeated rendering, create a [`PixelRenderer`] instance and reuse it.
+ * Using this function repeatedly (200+ times) may cause resource exhaustion errors.
+ * For repeated rendering, create a [`PixelRenderer`] instance and reuse it.
  */
 export declare function renderPixels(window: Window, buffer: Buffer, bufferWidth: number, bufferHeight: number): void
 

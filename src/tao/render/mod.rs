@@ -1,7 +1,7 @@
 //! Pixel renderer module
 //!
 //! Provides a minimal API for rendering RGBA pixel buffers to Tao windows.
-//! Uses X11 via pixels crate (Wayland support removed).
+//! Uses the pixels crate which supports multiple backends (X11, DXGI, Cocoa).
 
 use crate::tao::enums::ScaleMode;
 use crate::tao::render::scaling::calculate_scaled_dimensions;
@@ -23,18 +23,16 @@ macro_rules! debug_log {
 }
 
 /// Per-window rendering state to avoid resource exhaustion
-#[cfg(target_os = "linux")]
-struct X11RenderState {
+struct RenderState {
   pixels: pixels::Pixels<'static>,
   last_window_width: u32,
   last_window_height: u32,
 }
 
-/// Global cache for X11 rendering state to avoid "Maximum number of clients reached" errors.
-/// The key is the window ID.
-#[cfg(target_os = "linux")]
-static X11_RENDER_STATE: std::sync::LazyLock<
-  Mutex<RefCell<std::collections::HashMap<u64, X11RenderState>>>,
+/// Global cache for rendering state to avoid resource exhaustion errors.
+/// The key is the window ID. Works on all platforms (X11, DXGI, Cocoa).
+static RENDER_STATE: std::sync::LazyLock<
+  Mutex<RefCell<std::collections::HashMap<u64, RenderState>>>,
 > = std::sync::LazyLock::new(|| Mutex::new(RefCell::new(std::collections::HashMap::new())));
 
 /// Render options for pixel buffer display
@@ -64,11 +62,9 @@ impl Default for RenderOptions {
 
 /// Simple pixel renderer for Tao windows
 ///
-/// NOTE: This renderer uses global caches to avoid X11 client limit errors.
-/// The "Maximum number of clients reached" error occurs when creating too many
-/// X11 contexts/surfaces. This implementation uses a global cache keyed by window ID
-/// to reuse rendering resources across render calls and even across different
-/// PixelRenderer instances.
+/// NOTE: This renderer uses a global cache to avoid resource exhaustion errors
+/// that occur when creating too many contexts/surfaces on each render call.
+/// Resources are cached per-window and reused across all PixelRenderer instances.
 #[napi]
 pub struct PixelRenderer {
   buffer_width: u32,
@@ -132,8 +128,8 @@ impl PixelRenderer {
   /// * `buffer` - RGBA pixel buffer (must be buffer_width * buffer_height * 4 bytes)
   ///
   /// # Performance Note
-  /// This method uses global caches to avoid X11 "Maximum number of clients reached"
-  /// errors that occur when creating new contexts/surfaces on each render call.
+  /// This method uses a global cache to avoid resource exhaustion errors
+  /// that occur when creating new contexts/surfaces on each render call.
   /// Resources are cached per-window and reused across all PixelRenderer instances.
   #[napi]
   pub fn render(&self, window: &crate::tao::structs::Window, buffer: Buffer) -> napi::Result<()> {
@@ -182,8 +178,8 @@ impl PixelRenderer {
       ));
     }
 
-    // X11: Use cached pixels instance to avoid resource exhaustion
-    self.render_x11_cached(
+    // Render using cached pixels instance
+    self.render_cached(
       window_id_u64,
       &window_guard,
       &buffer,
@@ -192,9 +188,8 @@ impl PixelRenderer {
     )
   }
 
-  /// Render using cached pixels instance for X11
-  #[cfg(target_os = "linux")]
-  fn render_x11_cached(
+  /// Render using cached pixels instance (platform-agnostic)
+  fn render_cached(
     &self,
     window_id: u64,
     window: &tao::window::Window,
@@ -203,10 +198,10 @@ impl PixelRenderer {
     window_height: u32,
   ) -> napi::Result<()> {
     // Get or create the rendering state from the global cache
-    let cache = X11_RENDER_STATE.lock().map_err(|_| {
+    let cache = RENDER_STATE.lock().map_err(|_| {
       napi::Error::new(
         napi::Status::GenericFailure,
-        "Failed to lock X11 render state cache".to_string(),
+        "Failed to lock render state cache".to_string(),
       )
     })?;
 
@@ -237,7 +232,7 @@ impl PixelRenderer {
 
       cache.borrow_mut().insert(
         window_id,
-        X11RenderState {
+        RenderState {
           pixels: static_pixels,
           last_window_width: window_width,
           last_window_height: window_height,
@@ -292,7 +287,7 @@ impl PixelRenderer {
 
         cache.borrow_mut().insert(
           window_id,
-          X11RenderState {
+          RenderState {
             pixels: static_pixels,
             last_window_width: window_width,
             last_window_height: window_height,
@@ -333,7 +328,7 @@ impl PixelRenderer {
     );
 
     debug_log!(
-      "render_x11_cached: buffer={}x{}, window={}x{}, scale_mode={:?}",
+      "render_cached: buffer={}x{}, window={}x{}, scale_mode={:?}",
       self.buffer_width,
       self.buffer_height,
       window_width,
@@ -427,22 +422,6 @@ impl PixelRenderer {
 
     Ok(())
   }
-
-  /// Fallback for non-Linux platforms
-  #[cfg(not(target_os = "linux"))]
-  fn render_x11_cached(
-    &self,
-    _window_id: u64,
-    _window: &tao::window::Window,
-    _buffer: &[u8],
-    _window_width: u32,
-    _window_height: u32,
-  ) -> napi::Result<()> {
-    Err(napi::Error::new(
-      napi::Status::GenericFailure,
-      "X11 rendering not supported on this platform".to_string(),
-    ))
-  }
 }
 
 /// Simple function to render a pixel buffer to a window
@@ -451,8 +430,8 @@ impl PixelRenderer {
 /// For repeated rendering, use [`PixelRenderer`] instead.
 ///
 /// # Warning
-/// Using this function repeatedly (200+ times) may cause X11 "Maximum number of clients reached"
-/// errors. For repeated rendering, create a [`PixelRenderer`] instance and reuse it.
+/// Using this function repeatedly (200+ times) may cause resource exhaustion errors.
+/// For repeated rendering, create a [`PixelRenderer`] instance and reuse it.
 #[napi]
 pub fn render_pixels(
   window: &crate::tao::structs::Window,

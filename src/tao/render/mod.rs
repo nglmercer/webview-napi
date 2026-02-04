@@ -197,7 +197,7 @@ impl PixelRenderer {
     window_width: u32,
     window_height: u32,
   ) -> napi::Result<()> {
-    // Get or create the rendering state from the global cache
+    // Get or create the rendering state from the global cache using entry API
     let cache = RENDER_STATE.lock().map_err(|_| {
       napi::Error::new(
         napi::Status::GenericFailure,
@@ -205,52 +205,28 @@ impl PixelRenderer {
       )
     })?;
 
-    // Check if we need to create a new pixels instance for this window
-    let needs_create = {
-      let cache_ref = cache.borrow();
-      !cache_ref.contains_key(&window_id)
-    };
-
-    if needs_create {
-      // Create new pixels instance with window dimensions (not buffer dimensions)
-      // This ensures the pixel buffer matches the window size for proper scaling
+    // Use entry API for single lookup - more efficient than contains_key + get_mut
+    let mut cache_ref = cache.borrow_mut();
+    let state = cache_ref.entry(window_id).or_insert_with(|| {
+      // Create new pixels instance with window dimensions
       let surface_texture = pixels::SurfaceTexture::new(window_width, window_height, window);
-      let new_pixels =
-        pixels::Pixels::new(window_width, window_height, surface_texture).map_err(|e| {
-          napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to create pixels: {:?}", e),
-          )
-        })?;
+      let new_pixels = pixels::Pixels::new(window_width, window_height, surface_texture)
+        .expect("Failed to create pixels instance");
 
-      // SAFETY: We need to extend the lifetime to 'static for storage.
-      // This is safe because:
+      // SAFETY: Extending lifetime to 'static is safe because:
       // 1. The pixels instance is only used while the window is alive
       // 2. The window ID is unique and won't be reused
       // 3. We clean up when the window is closed
       let static_pixels: pixels::Pixels<'static> = unsafe { std::mem::transmute(new_pixels) };
 
-      cache.borrow_mut().insert(
-        window_id,
-        RenderState {
-          pixels: static_pixels,
-          last_window_width: window_width,
-          last_window_height: window_height,
-        },
-      );
-    }
+      RenderState {
+        pixels: static_pixels,
+        last_window_width: window_width,
+        last_window_height: window_height,
+      }
+    });
 
-    // Get mutable reference to state from cache
-    let mut cache_mut = cache.borrow_mut();
-    let state = cache_mut.get_mut(&window_id).ok_or_else(|| {
-      napi::Error::new(
-        napi::Status::GenericFailure,
-        "Render state not available in cache".to_string(),
-      )
-    })?;
-
-    // Handle window resize if needed by comparing with cached window size
-    // Only resize when the window size actually changes to avoid lag
+    // Handle window resize if needed
     let needs_resize =
       state.last_window_width != window_width || state.last_window_height != window_height;
 
@@ -270,10 +246,13 @@ impl PixelRenderer {
           e
         );
         // If resize fails, fall back to recreating
-        drop(cache_mut);
-        cache.borrow_mut().remove(&window_id);
+        // Drop the current borrow of the hashmap
+        drop(cache_ref);
 
-        // Recreate
+        // Get mutable access to cache and recreate
+        let mut cache_mut = cache.borrow_mut();
+        cache_mut.remove(&window_id);
+
         let surface_texture = pixels::SurfaceTexture::new(window_width, window_height, window);
         let new_pixels = pixels::Pixels::new(window_width, window_height, surface_texture)
           .map_err(|e| {
@@ -285,7 +264,7 @@ impl PixelRenderer {
 
         let static_pixels: pixels::Pixels<'static> = unsafe { std::mem::transmute(new_pixels) };
 
-        cache.borrow_mut().insert(
+        cache_mut.insert(
           window_id,
           RenderState {
             pixels: static_pixels,
@@ -293,7 +272,17 @@ impl PixelRenderer {
             last_window_height: window_height,
           },
         );
-        cache_mut = cache.borrow_mut();
+
+        // Get the newly inserted state
+        let state = cache_mut.get_mut(&window_id).ok_or_else(|| {
+          napi::Error::new(
+            napi::Status::GenericFailure,
+            "Render state not available after recreation".to_string(),
+          )
+        })?;
+
+        // Continue with rendering using the new state
+        return self.render_with_state(state, buffer, window_width, window_height);
       } else {
         // Also resize the pixel buffer to match window dimensions
         if let Err(e) = state.pixels.resize_buffer(window_width, window_height) {
@@ -311,13 +300,17 @@ impl PixelRenderer {
       }
     }
 
-    let state = cache_mut.get_mut(&window_id).ok_or_else(|| {
-      napi::Error::new(
-        napi::Status::GenericFailure,
-        "Render state not available after resize".to_string(),
-      )
-    })?;
+    self.render_with_state(state, buffer, window_width, window_height)
+  }
 
+  /// Render using an already acquired state
+  fn render_with_state<'a>(
+    &self,
+    state: &'a mut RenderState,
+    buffer: &[u8],
+    window_width: u32,
+    window_height: u32,
+  ) -> napi::Result<()> {
     // Apply scaling if needed
     let (offset_x, offset_y, scaled_width, scaled_height) = calculate_scaled_dimensions(
       self.buffer_width,
@@ -328,7 +321,7 @@ impl PixelRenderer {
     );
 
     debug_log!(
-      "render_cached: buffer={}x{}, window={}x{}, scale_mode={:?}",
+      "render_with_state: buffer={}x{}, window={}x{}, scale_mode={:?}",
       self.buffer_width,
       self.buffer_height,
       window_width,

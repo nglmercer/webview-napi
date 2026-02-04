@@ -70,7 +70,8 @@ impl PlatformInfo {
       }
 
       // Priority 3: Headless / Console
-      PlatformInfo {
+      #[deny(clippy::needless_return)]
+      return PlatformInfo {
         display_server: DisplayServer::Unknown,
         supports_transparency: false,
         supports_positioning: false,

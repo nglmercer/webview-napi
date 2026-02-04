@@ -1,6 +1,6 @@
 {
   "name": "webview-napi",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Robust cross-platform webview library for Node.js written in Rust. It also works with deno and bun.",
   "main": "./index.js",
   "types": "./index.d.ts",

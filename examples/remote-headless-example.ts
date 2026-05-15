@@ -57,7 +57,7 @@ function startRemoteBridge() {
           logger.info(`Agent received from Remote: ${lastRemoteMessage}`);
           res.writeHead(200);
           res.end('OK');
-        } catch (_e: any) {
+        } catch {
           res.writeHead(400);
           res.end('Invalid JSON');
         }

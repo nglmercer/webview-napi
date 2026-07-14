@@ -71,7 +71,7 @@ class UrlLoadManager {
       throw new Error('No webview reference available')
     }
 
-    this.webview.navigate(url)
+    this.webview.loadUrl(url)
     logger.info('Navigated to new URL', { url })
   }
 
@@ -85,30 +85,6 @@ class UrlLoadManager {
 
     this.webview.reload()
     logger.info('Page reloaded')
-  }
-
-  /**
-   * Go back in history
-   */
-  goBack(): void {
-    if (!this.webview) {
-      throw new Error('No webview reference available')
-    }
-
-    this.webview.goBack()
-    logger.info('Navigated back')
-  }
-
-  /**
-   * Go forward in history
-   */
-  goForward(): void {
-    if (!this.webview) {
-      throw new Error('No webview reference available')
-    }
-
-    this.webview.goForward()
-    logger.info('Navigated forward')
   }
 }
 
@@ -147,8 +123,7 @@ async function main() {
 
     logger.section('WebView Features')
     logger.info('URL loading from external source')
-    logger.info('Full web browsing capabilities')
-    logger.info('Navigation controls available')
+    logger.info('Navigation via loadUrl() and reload()')
     logger.info('DevTools support enabled')
 
     logger.section('Starting Event Loop')

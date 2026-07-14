@@ -6,7 +6,7 @@
 ![Node Version](https://img.shields.io/badge/Node-%3E%3D24-339933?logo=node.js)
 ![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-A high-performance desktop application framework for Node.js, Deno, and Bun. This library provides native bindings to **Tao** for cross-platform window management and **Wry** for rendering web-based user interfaces.
+A high-performance desktop application framework for Node.js and Bun. This library provides native bindings to **Tao** for cross-platform window management and **Wry** for rendering web-based user interfaces.
 
 </div>
 
@@ -83,10 +83,10 @@ The framework consists of three main layers:
 The `Application` class provides a high-level wrapper to get started quickly.
 
 ```typescript
-import { Application } from 'webview-napi';
+import { Application, ControlFlow } from 'webview-napi';
 
 const app = new Application({
-  controlFlow: 0 // Poll
+  controlFlow: ControlFlow.Poll
 });
 
 const window = app.createBrowserWindow({
@@ -104,9 +104,9 @@ app.run();
 For more control, use the `EventLoop`, `WindowBuilder`, and `WebViewBuilder`.
 
 ```typescript
-import { EventLoopBuilder, WindowBuilder, WebViewBuilder } from 'webview-napi';
+import { EventLoop, WindowBuilder, WebViewBuilder } from 'webview-napi';
 
-const eventLoop = new EventLoopBuilder().build();
+const eventLoop = new EventLoop();
 const window = new WindowBuilder()
   .withTitle("Advanced Window")
   .withInnerSize(1024, 768)
@@ -114,7 +114,7 @@ const window = new WindowBuilder()
 
 const webview = new WebViewBuilder()
   .withUrl("https://github.com")
-  .build(eventLoop, "main-view");
+  .buildOnWindow(window, "main-view");
 
 eventLoop.run();
 ```

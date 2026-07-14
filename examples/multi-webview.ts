@@ -1,4 +1,4 @@
-import { Application, ProgressBarState } from '../index.js'
+import { Application } from '../index.js'
 
 const width = 800;
 const height = 600;
@@ -15,25 +15,22 @@ const window = app.createBrowserWindow({
 
 const webview1 = window.createWebview({
     url: 'https://nodejs.org',
-    child: true,
     width: width / 2,
     height
 });
 
 const webview2 = window.createWebview({
     url: 'https://deno.land',
-    child: true,
     width: width / 2,
     x: width / 2,
     height,
 });
 
-webview1.onIpcMessage((message) => {
-
+webview1.onIpcMessage((_err, message) => {
     console.log('Received message from webview 1:', message)
 })
 
-webview2.onIpcMessage((message) => {
+webview2.onIpcMessage((_err, message) => {
     console.log('Received message from webview 2:', message)
 })
 webview1.evaluateScript(`setTimeout(() => {

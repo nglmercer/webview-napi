@@ -8,7 +8,6 @@
 
 import {
   WindowOptions,
-  //@ts-ignore
   WindowAttributes,
   WindowSizeConstraints,
   TaoTheme,
@@ -16,7 +15,6 @@ import {
   WryTheme,
   InitializationScript,
   Size,
-  //@ts-ignore
   Position
 } from '../index'
 

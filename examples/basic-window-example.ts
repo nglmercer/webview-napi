@@ -117,7 +117,7 @@ class WindowManager {
       throw new Error('No window reference available')
     }
 
-    this.window.maximize()
+    this.window.setMaximized(true)
     logger.info('Window maximized')
   }
 
@@ -129,19 +129,20 @@ class WindowManager {
       throw new Error('No window reference available')
     }
 
-    this.window.minimize()
+    this.window.setMinimized(true)
     logger.info('Window minimized')
   }
 
   /**
-   * Restore window
+   * Restore window (unmaximize and unminimize)
    */
   restore(): void {
     if (!this.window) {
       throw new Error('No window reference available')
     }
 
-    this.window.restore()
+    this.window.setMaximized(false)
+    this.window.setMinimized(false)
     logger.info('Window restored')
   }
 

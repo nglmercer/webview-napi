@@ -33,20 +33,20 @@ const webview = browserWindow.createWebview({
     <body>
       <h1>Close Example</h1>
       <p>This example demonstrates how to close the application gracefully.</p>
-      <button onclick="closeApp()">Close Application</button>
-      <button onclick="reloadWebview()">Reload Webview</button>
-      <script>
-        function closeApp() {
-          // This will trigger the ApplicationCloseRequested event
-          // and clean up all resources including temp folders
-          window.close();
-        }
-        
-        function reloadWebview() {
-          // This will reload the webview
-          location.reload();
-        }
-      </script>
+        <button onclick="closeApp()">Close Application</button>
+        <button onclick="reloadWebview()">Reload Webview</button>
+        <script>
+          function closeApp() {
+            // This triggers a browser-level close which the event loop
+            // detects as a WindowCloseRequested event
+            window.close();
+          }
+          
+          function reloadWebview() {
+            // This will reload the webview
+            location.reload();
+          }
+        </script>
     </body>
     </html>
   `,
@@ -54,19 +54,13 @@ const webview = browserWindow.createWebview({
 
 // Set up event handler for application events
 // You can use either onEvent() or bind() - they are equivalent
-app.bind((_e,event) => {
+app.bind((_e, event) => {
   console.log('Application event:', event.event);
-  
+
   if (event.event === WebviewApplicationEvent.WindowCloseRequested) {
     console.log('Window close requested');
     // You can perform cleanup here before the window closes
     // For example: save data, close connections, etc.
-  }
-  
-  if (event.event === WebviewApplicationEvent.ApplicationCloseRequested) {
-    console.log('Application close requested');
-    // Perform final cleanup before the application exits
-    // This is where temp folders will be cleaned up
   }
 });
 
@@ -79,13 +73,13 @@ app.bind((_e,event) => {
 // Example: Programmatically hide the window
 // setTimeout(() => {
 //   console.log('Hiding window...');
-//   browserWindow.hide();
+//   browserWindow.setVisible(false);
 // }, 3000);
 
 // Example: Programmatically show the window
 // setTimeout(() => {
 //   console.log('Showing window...');
-//   browserWindow.show();
+//   browserWindow.setVisible(true);
 // }, 4000);
 
 // Run the application

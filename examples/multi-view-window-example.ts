@@ -1,71 +1,44 @@
 /**
- * Multi-View Window Example
- * 
- * Demonstrates creating a window with multiple WebViews as separate views
- * using @webviewjs/webview
+ * Multi-Window Example
+ *
+ * Demonstrates creating multiple windows, each with its own WebView,
+ * sharing a single EventLoop.
+ *
+ * NOTE: On Linux/GTK, each window can only host a single webview due to
+ * GTK's GtkBin constraint. This example uses multiple windows instead.
  */
 
 import { WindowBuilder, WebViewBuilder, EventLoop, TaoTheme } from '../index'
 import { createLogger } from './logger'
 
-const logger = createLogger('MultiViewWindow')
+const logger = createLogger('MultiWindow')
 
 interface ViewConfig {
   label: string
+  title: string
   html: string
 }
 
-class MultiViewManager {
-  private window: any = null
-  private views: Map<string, any> = new Map()
+class MultiWindowManager {
+  private windows: Map<string, { window: any; webview: any }> = new Map()
 
   constructor() {
-    logger.info('Multi-View Manager initialized')
+    logger.info('Multi-Window Manager initialized')
   }
 
   /**
-   * Set window reference
+   * Add a window+webview pair to the manager
    */
-  setWindow(window: any): void {
-    this.window = window
-    logger.debug('Window reference set', { windowId: window.id })
-  }
-
-  /**
-   * Add a view to the manager
-   */
-  addView(label: string, webview: any): void {
-    this.views.set(label, webview)
-    logger.info('View added', { label, webviewId: webview.id })
+  addView(label: string, window: any, webview: any): void {
+    this.windows.set(label, { window, webview })
+    logger.info('View added', { label, windowId: window.id, webviewId: webview.id })
   }
 
   /**
    * Get a specific view by label
    */
-  getView(label: string): any {
-    return this.views.get(label)
-  }
-
-  /**
-   * Get all views
-   */
-  getAllViews(): Map<string, any> {
-    return this.views
-  }
-
-  /**
-   * Get views information
-   */
-  getViewsInfo(): any[] {
-    const info: any[] = []
-    this.views.forEach((webview, label) => {
-      info.push({
-        label,
-        id: webview.id,
-        webview
-      })
-    })
-    return info
+  getView(label: string): { window: any; webview: any } | undefined {
+    return this.windows.get(label)
   }
 
   /**
@@ -73,18 +46,20 @@ class MultiViewManager {
    */
   logViewsInfo(): void {
     logger.section('Views Information')
-    const info = this.getViewsInfo()
-    info.forEach(view => {
-      logger.object(`View: ${view.label}`, {
-        id: view.id,
-        webview: view.webview
+    this.windows.forEach(({ window, webview }, label) => {
+      logger.object(`View: ${label}`, {
+        windowId: window.id,
+        title: window.title(),
+        webviewId: webview.id,
+        label: webview.label
       })
     })
   }
+
 }
 
 /**
- * Create header HTML for the multi-view window
+ * Create header HTML
  */
 function createHeaderHtml(): string {
   return `
@@ -115,14 +90,14 @@ function createHeaderHtml(): string {
         </style>
       </head>
       <body>
-        <h1>Multi-View Control Panel</h1>
+        <h1>Multi-Window Control Panel</h1>
       </body>
     </html>
   `
 }
 
 /**
- * Create content HTML for the multi-view window
+ * Create content HTML
  */
 function createContentHtml(): string {
   return `
@@ -207,54 +182,54 @@ function createContentHtml(): string {
 }
 
 /**
- * Main function to run multi-view window example
+ * Main function to run multi-window example
  */
 async function main() {
-  logger.banner('Multi-View Window Example', 'Demonstrating multiple WebViews in a single window')
+  logger.banner('Multi-Window Example', 'Demonstrating multiple windows with shared EventLoop')
 
   try {
     logger.info('Creating event loop...')
     const eventLoop = new EventLoop()
-    const multiViewManager = new MultiViewManager()
+    const multiWindowManager = new MultiWindowManager()
 
     logger.success('Event loop created')
 
-    logger.section('Creating Main Window')
-    logger.info('Creating window with dark theme...')
-    const window = new WindowBuilder()
-      .withTitle('Multi-View Window')
-      .withInnerSize(1000, 800)
+    logger.section('Creating Header Window')
+    const headerHtml = createHeaderHtml()
+    const headerWindow = new WindowBuilder()
+      .withTitle('Control Panel')
+      .withInnerSize(500, 400)
       .withTheme(TaoTheme.Dark)
       .build(eventLoop)
-
-    multiViewManager.setWindow(window)
-    logger.success('Window created', { windowId: window.id })
-
-    logger.section('Creating Header View')
-    const headerHtml = createHeaderHtml()
     const headerView = new WebViewBuilder()
       .withHtml(headerHtml)
-      .buildOnWindow(window, 'header-view')
+      .buildOnWindow(headerWindow, 'header-view')
 
-    multiViewManager.addView('header', headerView)
-    logger.success('Header view created', { viewId: headerView.id })
+    multiWindowManager.addView('header', headerWindow, headerView)
+    logger.success('Header window created', { windowId: headerWindow.id, webviewId: headerView.id })
 
-    logger.section('Creating Content View')
+    logger.section('Creating Content Window')
     const contentHtml = createContentHtml()
+    const contentWindow = new WindowBuilder()
+      .withTitle('Dashboard')
+      .withInnerSize(600, 500)
+      .withPosition(520, 100)
+      .withTheme(TaoTheme.Dark)
+      .build(eventLoop)
     const contentView = new WebViewBuilder()
       .withHtml(contentHtml)
-      .buildOnWindow(window, 'content-view')
+      .buildOnWindow(contentWindow, 'content-view')
 
-    multiViewManager.addView('content', contentView)
-    logger.success('Content view created', { viewId: contentView.id })
+    multiWindowManager.addView('content', contentWindow, contentView)
+    logger.success('Content window created', { windowId: contentWindow.id, webviewId: contentView.id })
 
-    multiViewManager.logViewsInfo()
+    multiWindowManager.logViewsInfo()
 
-    logger.section('Multi-View Features')
-    logger.info('Multiple independent WebViews')
-    logger.info('Separate HTML content per view')
-    logger.info('Shared window context')
-    logger.info('Individual view management')
+    logger.section('Multi-Window Features')
+    logger.info('Multiple independent windows')
+    logger.info('Each window hosts its own WebView')
+    logger.info('Shared EventLoop for event processing')
+    logger.info('Individual window management')
 
     logger.section('Starting Event Loop')
     logger.info('Press Ctrl+C to exit')
@@ -262,7 +237,7 @@ async function main() {
     eventLoop.run()
 
   } catch (error) {
-    logger.error('Error executing multi-view window example', {
+    logger.error('Error executing multi-window example', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
     })

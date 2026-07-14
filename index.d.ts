@@ -1557,7 +1557,6 @@ export interface WebviewOptions {
   enableDevtools?: boolean
   incognito?: boolean
   userAgent?: string
-  child?: boolean
   preload?: string
   transparent?: boolean
   theme?: Theme

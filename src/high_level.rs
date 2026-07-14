@@ -427,21 +427,33 @@ impl Application {
 
         app_ref.process_pending_items(event_loop_target);
 
-        if let tao::event::Event::WindowEvent {
-          event: tao::event::WindowEvent::CloseRequested,
-          ..
-        } = event
-        {
-          let mut h = handler_clone.lock().unwrap();
-          if let Some(handler) = h.as_mut() {
-            let _ = handler.call(
-              Ok(ApplicationEvent {
-                event: WebviewApplicationEvent::WindowCloseRequested,
-              }),
-              ThreadsafeFunctionCallMode::NonBlocking,
-            );
+        match event {
+          // Handle redraw requests to ensure window content is painted
+          tao::event::Event::RedrawRequested(_) => {
+            // Window content will be drawn by the window's renderer
           }
-          *control_flow = tao::event_loop::ControlFlow::Exit;
+          // Exit when window close is requested
+          tao::event::Event::WindowEvent {
+            event: tao::event::WindowEvent::CloseRequested,
+            ..
+          } => {
+            let mut h = handler_clone.lock().unwrap();
+            if let Some(handler) = h.as_mut() {
+              let _ = handler.call(
+                Ok(ApplicationEvent {
+                  event: WebviewApplicationEvent::WindowCloseRequested,
+                }),
+                ThreadsafeFunctionCallMode::NonBlocking,
+              );
+            }
+            *control_flow = tao::event_loop::ControlFlow::Exit;
+          }
+          // RedrawEventsCleared indicates all events have been processed
+          // and the window should be visible now
+          tao::event::Event::RedrawEventsCleared => {
+            // Window is now visible and ready
+          }
+          _ => {}
         }
       });
     }

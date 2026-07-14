@@ -402,12 +402,24 @@ impl EventLoop {
     if let Some(event_loop) = self.inner.take() {
       event_loop.run(move |event, _, control_flow| {
         *control_flow = tao::event_loop::ControlFlow::Wait;
-        if let tao::event::Event::WindowEvent {
-          event: tao::event::WindowEvent::CloseRequested,
-          ..
-        } = event
-        {
-          *control_flow = tao::event_loop::ControlFlow::Exit;
+        match event {
+          // Handle redraw requests to ensure window content is painted
+          tao::event::Event::RedrawRequested(_) => {
+            // Window content will be drawn by the window's renderer
+          }
+          // Exit when window close is requested
+          tao::event::Event::WindowEvent {
+            event: tao::event::WindowEvent::CloseRequested,
+            ..
+          } => {
+            *control_flow = tao::event_loop::ControlFlow::Exit;
+          }
+          // RedrawEventsCleared indicates all events have been processed
+          // and the window should be visible now
+          tao::event::Event::RedrawEventsCleared => {
+            // Window is now visible and ready
+          }
+          _ => {}
         }
       });
     }

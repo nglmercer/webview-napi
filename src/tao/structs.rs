@@ -354,8 +354,9 @@ pub struct EventLoop {
 
 /// Global flag to track if an EventLoop has been created in this process.
 /// GTK on Linux can only have one application instance per process.
+/// This is shared between the EventLoop constructor and monitor query functions.
 #[cfg(target_os = "linux")]
-static EVENT_LOOP_CREATED: std::sync::atomic::AtomicBool =
+pub(crate) static EVENT_LOOP_CREATED: std::sync::atomic::AtomicBool =
   std::sync::atomic::AtomicBool::new(false);
 
 #[napi]
@@ -930,12 +931,24 @@ impl Window {
   }
 
   /// Closes the window.
+  /// This hides the window immediately. The underlying window handle is still held
+  /// until the Window struct is dropped.
   #[napi]
   pub fn close(&self) -> Result<()> {
     if let Some(inner) = &self.inner {
-      inner.lock().unwrap().request_redraw();
+      inner.lock().unwrap().set_visible(false);
     }
     Ok(())
+  }
+
+  /// Returns true if the window is marked as closed (hidden via close()).
+  #[napi]
+  pub fn is_closed(&self) -> Result<bool> {
+    if let Some(inner) = &self.inner {
+      Ok(!inner.lock().unwrap().is_visible())
+    } else {
+      Ok(true)
+    }
   }
 }
 

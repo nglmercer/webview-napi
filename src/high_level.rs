@@ -323,6 +323,7 @@ impl Application {
           #[allow(clippy::arc_with_non_send_sync)]
           inner: Some(Arc::new(Mutex::new(window))),
         });
+        drop(handle);
 
         // Create pending webviews for this window
         let mut pending_webviews = webviews_to_create.lock().unwrap();
@@ -384,16 +385,23 @@ impl Application {
               let _ = builder.with_initialization_script(init_script);
             }
             // Build the webview - pass the ipc_listeners Arc directly to setup_ipc_handler
+            let win_handle_ref = win_handle.lock().unwrap();
+            let Some(window_ref) = win_handle_ref.as_ref() else {
+              continue;
+            };
             if let Ok(webview) = builder.build_on_window(
-              handle.as_ref().unwrap(),
+              window_ref,
               "webview".to_string(),
               Some(ipc_listeners.clone()),
             ) {
+              drop(win_handle_ref);
               let mut wv_handle = webview_handle.lock().unwrap();
               *wv_handle = Some(webview);
 
               // Apply any pending actions that were called before the webview was initialized
-              apply_pending_actions(wv_handle.as_ref().unwrap(), &pending_actions);
+              if let Some(wv) = wv_handle.as_ref() {
+                apply_pending_actions(wv, &pending_actions);
+              }
             }
           }
         }
@@ -734,7 +742,7 @@ impl BrowserWindow {
 
   #[napi]
   pub fn get_primary_monitor(&self) -> Option<Monitor> {
-    let m = crate::tao::functions::primary_monitor();
+    let m = crate::tao::functions::primary_monitor()?;
     Some(Monitor {
       name: m.name,
       scale_factor: m.scale_factor,

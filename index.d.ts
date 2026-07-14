@@ -385,8 +385,14 @@ export declare class Window {
   setIgnoreCursorEvents(ignore: boolean): void
   /** Requests a redrawing of the window. */
   requestRedraw(): void
-  /** Closes the window. */
+  /**
+   * Closes the window.
+   * This hides the window immediately. The underlying window handle is still held
+   * until the Window struct is dropped.
+   */
   close(): void
+  /** Returns true if the window is marked as closed (hidden via close()). */
+  isClosed(): boolean
 }
 
 /** Builder for creating windows. */
@@ -435,7 +441,11 @@ export interface ApplicationOptions {
   exitCode?: number
 }
 
-/** Returns a list of all available monitors. */
+/**
+ * Returns a list of all available monitors.
+ * Returns an empty vector if no monitors are found, on error, or
+ * if monitors cannot be queried (e.g., when an EventLoop already exists on Linux).
+ */
 export declare function availableMonitors(): Array<MonitorInfo>
 
 /** Background throttling policy for webviews. */
@@ -1185,8 +1195,12 @@ export interface Position {
   y: number
 }
 
-/** Returns the primary monitor information. */
-export declare function primaryMonitor(): MonitorInfo
+/**
+ * Returns the primary monitor information.
+ * Returns Some(MonitorInfo) if a primary monitor exists, None on error or
+ * if the monitor cannot be queried (e.g., when an EventLoop already exists on Linux).
+ */
+export declare function primaryMonitor(): MonitorInfo | null
 
 export interface ProgressBarState {
   /** The progress status. */
@@ -1386,7 +1400,11 @@ export declare const enum TaoTheme {
   Dark = 1
 }
 
-/** Returns the current version of the tao crate. */
+/**
+ * Returns the current version of the tao crate.
+ * This value is extracted from Cargo.lock at compile time.
+ * The Cargo.toml dependency is: tao = "0.34.5"
+ */
 export declare function taoVersion(): string
 
 export declare const enum Theme {
@@ -1549,7 +1567,11 @@ export interface WebviewOptions {
   backForwardNavigationGestures?: boolean
 }
 
-/** Returns the version of the webview library. */
+/**
+ * Returns the version of the wry webview library as (major, minor, patch).
+ * The value is extracted from Cargo.lock at compile time and always matches
+ * the actual wry crate version used in the build.
+ */
 export declare function webviewVersion(): [number, number, number]
 
 /** Window attributes. */

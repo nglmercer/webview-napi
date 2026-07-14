@@ -701,6 +701,13 @@ impl WebViewBuilder {
       let window_ptr = window_inner.gtk_window();
       let window_ptr_raw = unsafe { *(window_ptr as *const _ as *const *mut std::ffi::c_void) };
 
+      if window_ptr_raw.is_null() {
+        return Err(napi::Error::new(
+          napi::Status::GenericFailure,
+          "GTK window pointer is null — cannot build webview on uninitialized window".to_string(),
+        ));
+      }
+
       unsafe {
         let child = gtk_bin_get_child(window_ptr_raw);
         if !child.is_null() {
@@ -916,6 +923,13 @@ impl WebViewBuilder {
 
       let window_ptr = window.gtk_window();
       let window_ptr_raw = unsafe { *(window_ptr as *const _ as *const *mut std::ffi::c_void) };
+
+      if window_ptr_raw.is_null() {
+        return Err(napi::Error::new(
+          napi::Status::GenericFailure,
+          "GTK window pointer is null — cannot build webview on uninitialized window".to_string(),
+        ));
+      }
 
       unsafe {
         let child = gtk_bin_get_child(window_ptr_raw);
@@ -1492,22 +1506,15 @@ fn setup_ipc_handler(
   let webview_builder = webview_builder.with_ipc_handler(move |req| {
     let msg = req.into_body();
 
-    // Check if we have any listeners registered
-    let listener_count = {
-      let listeners = listeners_clone.lock().unwrap();
-      listeners.len()
-    };
-
-    if listener_count == 0 {
+    // Check and dispatch while holding the lock briefly.
+    // We iterate and call callbacks while the lock is held to avoid Clone requirements.
+    // Callbacks should NOT try to modify the listeners list (would deadlock).
+    let listeners = listeners_clone.lock().unwrap();
+    if listeners.is_empty() {
       return;
     }
-
-    // Call each listener with the message using Blocking mode for immediate execution
-    let listeners = listeners_clone.lock().unwrap();
-    for (idx, listener) in listeners.iter().enumerate() {
-      let status = listener.call(Ok(msg.clone()), ThreadsafeFunctionCallMode::NonBlocking);
-      println!("Listener #{} call returned status: {:?}", idx, status);
-      //Ok(idx, status);
+    for listener in listeners.iter() {
+      let _ = listener.call(Ok(msg.clone()), ThreadsafeFunctionCallMode::NonBlocking);
     }
   });
 

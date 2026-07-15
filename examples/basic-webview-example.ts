@@ -1,12 +1,12 @@
 /**
  * Basic WebView Example
- * 
+ *
  * Demonstrates creating a simple webview with HTML content
  * using @webviewjs/webview
  */
 
-import { WebViewBuilder, EventLoop } from '../index'
-import { createLogger } from './logger'
+import { WebViewBuilder, EventLoop } from '../index.js'
+import { createLogger } from './logger.ts'
 
 const logger = createLogger('BasicWebView')
 

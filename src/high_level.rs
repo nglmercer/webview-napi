@@ -33,6 +33,74 @@ use tao::platform::unix::WindowBuilderExtUnix;
 #[cfg(target_os = "windows")]
 use tao::platform::windows::WindowBuilderExtWindows;
 
+/// Detects whether the native module is running under a non-Node N-API runtime
+/// (e.g. bun or deno) and applies GL workarounds to avoid crashes.
+///
+/// On Linux, WebKit/GTK initializes a hardware GL (Mesa/Gallium/EGL) context when
+/// the first `WebContext` is created. Under bun and deno this hardware-GL path
+/// crashes with a SIGSEGV inside `driCreateNewScreen3`, while Node.js is unaffected.
+/// Forcing software rendering (`LIBGL_ALWAYS_SOFTWARE=1`) sidesteps the crash and
+/// keeps the module working across all runtimes. We only do this for non-Node
+/// runtimes so that Node.js users keep hardware acceleration.
+///
+/// Crucially, when software GL is forced we must also run WebKit on the **X11**
+/// backend (`GDK_BACKEND=x11`). On Wayland, WebKitGTK relies on the DMABUF renderer
+/// for presentation and software GL (llvmpipe) cannot drive it, so the webview shows
+/// a black/blank surface. Under X11/XWayland the shared-memory (SHM) rendering path
+/// works correctly with software GL, which is why we also disable the DMABUF renderer.
+#[cfg(target_os = "linux")]
+fn apply_runtime_gl_workaround() {
+  use std::sync::Once;
+  static INIT: Once = Once::new();
+  INIT.call_once(|| {
+    let running_under_other_runtime = std::fs::read_link("/proc/self/exe")
+      .ok()
+      .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()))
+      .map(|name| name.contains("bun") || name.contains("deno"))
+      .unwrap_or(false);
+
+    if running_under_other_runtime {
+      let mut changed = false;
+
+      // Force the X11 GDK backend so WebKit uses the SHM rendering path, which works
+      // reliably with software GL. This must be set before GTK initializes (i.e.
+      // before the event loop / webview is created).
+      if std::env::var_os("GDK_BACKEND").is_none() {
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+          let _ = std::env::set_var("GDK_BACKEND", "x11");
+          changed = true;
+        }
+      }
+
+      if std::env::var_os("LIBGL_ALWAYS_SOFTWARE").is_none() {
+        let _ = std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        // Ensure a software rasterizer is actually selected for the Mesa GL stack.
+        if std::env::var_os("GALLIUM_DRIVER").is_none() {
+          let _ = std::env::set_var("GALLIUM_DRIVER", "llvmpipe");
+        }
+        changed = true;
+      }
+
+      if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        let _ = std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        changed = true;
+      }
+
+      if changed {
+        eprintln!(
+          "[webview-napi] Detected a non-Node runtime (bun/deno) on Wayland. Forcing the \
+           X11 backend (GDK_BACKEND=x11) and software GL (LIBGL_ALWAYS_SOFTWARE=1) and \
+           disabling the WebKit DMABUF renderer (WEBKIT_DISABLE_DMABUF_RENDERER=1) to avoid \
+           a Mesa hardware-GL crash and a black/blank webview under software rendering."
+        );
+      }
+    }
+  });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_runtime_gl_workaround() {}
+
 #[napi]
 pub enum WebviewApplicationEvent {
   WindowCloseRequested,
@@ -195,6 +263,10 @@ pub struct Application {
 impl Application {
   #[napi(constructor)]
   pub fn new(_options: Option<ApplicationOptions>) -> Self {
+    // Apply GL runtime workarounds (e.g. force software GL under bun/deno)
+    // before any WebKit/GTK initialization happens.
+    apply_runtime_gl_workaround();
+
     // Force X11 backend on Linux before creating the event loop
     // This must happen BEFORE the event loop is created to prevent Wayland protocol errors
     #[cfg(target_os = "linux")]
@@ -998,5 +1070,6 @@ impl Webview {
 
 #[napi]
 pub fn get_webview_version() -> String {
+  apply_runtime_gl_workaround();
   wry::webview_version().unwrap_or("unknown".to_string())
 }

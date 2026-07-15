@@ -16,9 +16,9 @@ import {
   InitializationScript,
   Size,
   Position
-} from '../index'
+} from '../index.js'
 
-import { createLogger } from './logger'
+import { createLogger } from './logger.ts'
 
 const logger = createLogger('Utils')
 

@@ -5,8 +5,8 @@
  * real-time animations, and professional styling using @webviewjs/webview
  */
 
-import { WindowBuilder, WebViewBuilder, EventLoop, TaoTheme } from '../index'
-import { createLogger } from './logger'
+import { WindowBuilder, WebViewBuilder, EventLoop, TaoTheme } from '../index.js'
+import { createLogger } from './logger.ts'
 
 const logger = createLogger('PremiumDashboard')
 

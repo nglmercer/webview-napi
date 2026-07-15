@@ -1,6 +1,6 @@
 
-import { EventLoop } from '../index'
-import { createLogger } from './logger'
+import { EventLoop } from '../index.js'
+import { createLogger } from './logger.ts'
 import { TransparencyHelper } from './transparency_helper'
 
 const logger = createLogger('TransparentWindow')

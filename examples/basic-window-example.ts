@@ -5,8 +5,8 @@
  * using @webviewjs/webview
  */
 
-import { WindowBuilder, EventLoop } from '../index'
-import { createLogger } from './logger'
+import { WindowBuilder, EventLoop } from '../index.js'
+import { createLogger } from './logger.ts'
 
 const logger = createLogger('BasicWindow')
 

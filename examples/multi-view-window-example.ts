@@ -8,8 +8,8 @@
  * GTK's GtkBin constraint. This example uses multiple windows instead.
  */
 
-import { WindowBuilder, WebViewBuilder, EventLoop, TaoTheme } from '../index'
-import { createLogger } from './logger'
+import { WindowBuilder, WebViewBuilder, EventLoop, TaoTheme } from '../index.js'
+import { createLogger } from './logger.ts'
 
 const logger = createLogger('MultiWindow')
 

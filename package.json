@@ -18,6 +18,7 @@
     "README.md",
     "index.d.ts",
     "index.js",
+    "index.cjs",
     "*.node"
   ],
   "napi": {
@@ -46,10 +47,10 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
-    "build:all": "napi build --release",
-    "build:prebuilds": "napi build --platform --release --strip",
+    "build": "napi build --platform --release --esm",
+    "build:debug": "napi build --platform --esm",
+    "build:all": "napi build --release --esm",
+    "build:prebuilds": "napi build --platform --release --strip --esm",
     "clean": "napi clean && cargo clean",
     "format": "run-p format:prettier format:rs",
     "format:prettier": "prettier . -w",

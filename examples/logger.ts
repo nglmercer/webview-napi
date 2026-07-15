@@ -5,13 +5,15 @@
  * and monitoring capabilities.
  */
 
-export enum LogLevel {
-  DEBUG = 'DEBUG',
-  INFO = 'INFO',
-  SUCCESS = 'SUCCESS',
-  WARNING = 'WARNING',
-  ERROR = 'ERROR'
-}
+export const LogLevel = {
+  DEBUG: 'DEBUG',
+  INFO: 'INFO',
+  SUCCESS: 'SUCCESS',
+  WARNING: 'WARNING',
+  ERROR: 'ERROR'
+} as const
+
+export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel]
 
 export interface LogEntry {
   level: LogLevel
@@ -142,9 +144,9 @@ class Logger {
    * Print banner
    */
   banner(title: string, subtitle?: string): void {
-    console.log(` ${title}${' '.repeat(58 - title.length)}`)
+    console.log(` ${title}${' '.repeat(Math.max(0, 58 - title.length))}`)
     if (subtitle) {
-      console.log(` ${subtitle}${' '.repeat(58 - subtitle.length)}`)
+      console.log(` ${subtitle}${' '.repeat(Math.max(0, 58 - subtitle.length))}`)
     }
   }
 }

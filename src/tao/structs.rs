@@ -364,11 +364,12 @@ impl EventLoop {
   /// Creates a new event loop.
   #[napi(constructor)]
   pub fn new() -> Result<Self> {
-    // Force X11 backend on Linux before creating the event loop
-    // This must happen BEFORE the event loop is created to prevent Wayland protocol errors
+    // Apply runtime GL / backend workarounds (software GL + native Wayland under
+    // bun/deno) BEFORE the event loop is created. GDK backend and GL env vars must
+    // be set before GTK initializes, or we hit Wayland protocol errors / crashes.
     #[cfg(target_os = "linux")]
     {
-      let _ = crate::tao::platform::platform_info();
+      crate::high_level::apply_runtime_gl_workaround();
     }
 
     // On Linux, GTK can only be initialized once per process.
@@ -491,11 +492,12 @@ impl EventLoopBuilder {
   /// Builds the event loop.
   #[napi]
   pub fn build(&mut self) -> Result<EventLoop> {
-    // Force X11 backend on Linux before creating the event loop
-    // This must happen BEFORE the event loop is created to prevent Wayland protocol errors
+    // Apply runtime GL / backend workarounds (software GL + native Wayland under
+    // bun/deno) BEFORE the event loop is created. GDK backend and GL env vars must
+    // be set before GTK initializes, or we hit Wayland protocol errors / crashes.
     #[cfg(target_os = "linux")]
     {
-      let _ = crate::tao::platform::platform_info();
+      crate::high_level::apply_runtime_gl_workaround();
     }
 
     // Handle backend selection BEFORE creating the event loop
@@ -684,11 +686,15 @@ impl Window {
   /// Sets the window position.
   #[napi]
   pub fn set_outer_position(&self, x: f64, y: f64) -> Result<()> {
-    if let Some(inner) = &self.inner {
-      inner
-        .lock()
-        .unwrap()
-        .set_outer_position(tao::dpi::PhysicalPosition::new(x as i32, y as i32));
+    // Wayland compositors own window placement and ignore absolute positioning,
+    // so only apply this on X11.
+    if crate::tao::platform::platform_info().is_x11() {
+      if let Some(inner) = &self.inner {
+        inner
+          .lock()
+          .unwrap()
+          .set_outer_position(tao::dpi::PhysicalPosition::new(x as i32, y as i32));
+      }
     }
     Ok(())
   }
@@ -1121,11 +1127,6 @@ impl WindowBuilder {
     // Detect platform information
     let platform_info = crate::tao::platform::platform_info();
 
-    println!(
-      "Building window with transparency: {}, platform: {:?}",
-      self.attributes.transparent, platform_info.display_server
-    );
-
     let mut builder = tao::window::WindowBuilder::new()
       .with_title(&self.attributes.title)
       .with_inner_size(tao::dpi::LogicalSize::new(
@@ -1148,9 +1149,14 @@ impl WindowBuilder {
     {
       // Handle platform-specific transparency settings
       if self.attributes.transparent {
-        // Only enable RGBA visual on X11
         if platform_info.is_x11() {
+          // X11 needs the RGBA visual for true transparency.
           builder = builder.with_rgba_visual(true);
+        } else if platform_info.is_wayland() {
+          // On Wayland, transparency is provided via a subsurface. Mark the
+          // window as app-paintable so GTK does not draw an opaque background
+          // over the transparent webview.
+          builder = builder.with_app_paintable(true);
         }
       }
     }

@@ -616,6 +616,14 @@ impl WebViewBuilder {
     })?;
     let window_inner = window_lock.lock().unwrap();
 
+    // Apply runtime GL / backend workarounds (software GL + native Wayland under
+    // bun/deno) before the WebContext/WebView is created, which is where the Mesa
+    // hardware-GL crash would otherwise occur.
+    #[cfg(target_os = "linux")]
+    {
+      crate::high_level::apply_runtime_gl_workaround();
+    }
+
     let mut webview_builder = wry::WebViewBuilder::new();
 
     webview_builder = webview_builder.with_transparent(self.attributes.transparent);

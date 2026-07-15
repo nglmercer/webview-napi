@@ -52,13 +52,16 @@ use tao::platform::windows::WindowBuilderExtWindows;
 /// setting `WEBVIEW_NAPI_PREFER_X11=1`, or by setting `GDK_BACKEND` directly. An
 /// explicit `GDK_BACKEND` is always respected and never overridden.
 #[cfg(target_os = "linux")]
-fn apply_runtime_gl_workaround() {
+pub(crate) fn apply_runtime_gl_workaround() {
   use std::sync::Once;
   static INIT: Once = Once::new();
   INIT.call_once(|| {
     let running_under_other_runtime = std::fs::read_link("/proc/self/exe")
       .ok()
-      .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()))
+      .and_then(|p| {
+        p.file_name()
+          .map(|n| n.to_string_lossy().to_ascii_lowercase())
+      })
       .map(|name| name.contains("bun") || name.contains("deno"))
       .unwrap_or(false);
 
@@ -68,21 +71,28 @@ fn apply_runtime_gl_workaround() {
       // Force software GL. This is what actually avoids the Mesa hardware-GL crash
       // and works on both X11 and native Wayland.
       if std::env::var_os("LIBGL_ALWAYS_SOFTWARE").is_none() {
-        let _ = std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
         // Ensure a software rasterizer is actually selected for the Mesa GL stack.
         if std::env::var_os("GALLIUM_DRIVER").is_none() {
-          let _ = std::env::set_var("GALLIUM_DRIVER", "llvmpipe");
+          std::env::set_var("GALLIUM_DRIVER", "llvmpipe");
         }
         changed = true;
       }
 
-      // Escape hatch: only force the X11 backend when explicitly requested. By
-      // default we let GTK pick Wayland natively (which works with software GL).
-      if std::env::var_os("GDK_BACKEND").is_none()
-        && std::env::var_os("WEBVIEW_NAPI_PREFER_X11").is_some()
-      {
-        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-          let _ = std::env::set_var("GDK_BACKEND", "x11");
+      // Backend selection. When no backend is pinned by the user:
+      // - If `WEBVIEW_NAPI_PREFER_X11` is set, force X11 (runs under XWayland).
+      // - Otherwise, explicitly select the native Wayland backend when a Wayland
+      //   session is detected, so GTK doesn't fall back to X11/XWayland when both
+      //   `WAYLAND_DISPLAY` and `DISPLAY` are present. This is only done when the
+      //   user has not set `GDK_BACKEND` themselves.
+      if std::env::var_os("GDK_BACKEND").is_none() {
+        if std::env::var_os("WEBVIEW_NAPI_PREFER_X11").is_some() {
+          if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            std::env::set_var("GDK_BACKEND", "x11");
+            changed = true;
+          }
+        } else if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+          std::env::set_var("GDK_BACKEND", "wayland");
           changed = true;
         }
       }
@@ -92,7 +102,7 @@ fn apply_runtime_gl_workaround() {
       // (webkitgtk-6.0), where DMABUF depends on hardware GL that llvmpipe can't
       // drive. Keeping it set is harmless and future-proofs the build.
       if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        let _ = std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         changed = true;
       }
 
@@ -271,9 +281,9 @@ pub struct Application {
   // garbage-collects those wrappers the finalizer would otherwise drop the `Arc`
   // and destroy the native window. Retaining a clone here guarantees the native
   // objects outlive the pending queue being drained after the first iteration.
-  #[allow(clippy::arc_with_non_send_sync)]
+  #[allow(clippy::arc_with_non_send_sync, clippy::type_complexity)]
   live_windows: Arc<Mutex<Vec<Arc<Mutex<Option<crate::tao::structs::Window>>>>>>,
-  #[allow(clippy::arc_with_non_send_sync)]
+  #[allow(clippy::arc_with_non_send_sync, clippy::type_complexity)]
   live_webviews: Arc<Mutex<Vec<Arc<Mutex<Option<crate::wry::structs::WebView>>>>>>,
   exit_requested: Arc<Mutex<bool>>,
 }
@@ -498,7 +508,11 @@ impl Application {
 
               // Retain a strong reference so the native webview survives even if the
               // JS Webview wrapper is later garbage-collected by the runtime.
-              self.live_webviews.lock().unwrap().push(webview_handle.clone());
+              self
+                .live_webviews
+                .lock()
+                .unwrap()
+                .push(webview_handle.clone());
 
               // Apply any pending actions that were called before the webview was initialized
               if let Some(wv) = wv_handle.as_ref() {

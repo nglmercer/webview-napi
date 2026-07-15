@@ -11,7 +11,11 @@ fn main() {
       let trimmed = line.trim();
       if trimmed.starts_with("name = \"wry\"") {
         if let Some(next_line) = lines.get(i + 1) {
-          if let Some(version_str) = next_line.trim().strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
+          if let Some(version_str) = next_line
+            .trim()
+            .strip_prefix("version = \"")
+            .and_then(|s| s.strip_suffix('"'))
+          {
             println!("cargo:rustc-env=WRY_VERSION={}", version_str);
           }
         }
@@ -22,7 +26,11 @@ fn main() {
       let trimmed = line.trim();
       if trimmed.starts_with("name = \"tao\"") {
         if let Some(next_line) = lines.get(i + 1) {
-          if let Some(version_str) = next_line.trim().strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
+          if let Some(version_str) = next_line
+            .trim()
+            .strip_prefix("version = \"")
+            .and_then(|s| s.strip_suffix('"'))
+          {
             println!("cargo:rustc-env=CARGO_PKG_TAO_VERSION={}", version_str);
           }
         }

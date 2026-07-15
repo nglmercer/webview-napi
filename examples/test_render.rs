@@ -6,13 +6,18 @@ use tao::event_loop::{ControlFlow, EventLoop};
 use tao::window::WindowBuilder;
 
 fn main() {
-  // --- FIX AUTOMÁTICO ---
-  // En Linux, forzamos el backend X11 internamente.
-  // Esto hace que la app use XWayland automáticamente si el usuario está en Wayland,
-  // evitando el "Error 71 Protocol Error" sin que el usuario configure nada.
+  // Use native Wayland when available, falling back to X11 otherwise. Only force
+  // a backend if the user hasn't pinned one already via GDK_BACKEND. This avoids
+  // the old hardcoded X11 fallback that forced XWayland even on Wayland sessions.
   #[cfg(target_os = "linux")]
   {
-    env::set_var("GDK_BACKEND", "x11");
+    if std::env::var_os("GDK_BACKEND").is_none() {
+      if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        env::set_var("GDK_BACKEND", "wayland");
+      } else if std::env::var_os("DISPLAY").is_some() {
+        env::set_var("GDK_BACKEND", "x11");
+      }
+    }
   }
 
   let event_loop = EventLoop::new();

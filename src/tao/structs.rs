@@ -1175,10 +1175,13 @@ impl WindowBuilder {
       .with_maximized(self.attributes.maximized)
       .with_focused(self.attributes.focused);
 
-    // Set position if provided
-    if let Some(x) = self.attributes.x {
-      if let Some(y) = self.attributes.y {
-        builder = builder.with_position(tao::dpi::LogicalPosition::new(x, y));
+    // Set position if provided. Wayland does not support absolute client-side
+    // window positioning, so only apply it on X11.
+    if platform_info.is_x11() {
+      if let Some(x) = self.attributes.x {
+        if let Some(y) = self.attributes.y {
+          builder = builder.with_position(tao::dpi::LogicalPosition::new(x, y));
+        }
       }
     }
 

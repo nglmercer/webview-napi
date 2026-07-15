@@ -39,8 +39,6 @@ webview.onIpcMessage((_e,data) => {
 // Now run the app with a polling loop to allow IPC callbacks to process
 const poll = () => {
     if (app.runIteration()) {
-        window.id;
-        webview.id;
         setTimeout(poll, 10);
     } else {
         process.exit(0);

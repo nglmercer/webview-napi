@@ -256,6 +256,15 @@ pub struct Application {
   handler: Arc<Mutex<Option<ThreadsafeFunction<ApplicationEvent>>>>,
   #[allow(clippy::arc_with_non_send_sync)]
   windows_to_create: Arc<Mutex<Vec<PendingWindow>>>,
+  // Keep the native Window/WebView alive for as long as the Application lives.
+  // The JS wrapper objects only hold an `Arc` clone; once the runtime (e.g. Bun)
+  // garbage-collects those wrappers the finalizer would otherwise drop the `Arc`
+  // and destroy the native window. Retaining a clone here guarantees the native
+  // objects outlive the pending queue being drained after the first iteration.
+  #[allow(clippy::arc_with_non_send_sync)]
+  live_windows: Arc<Mutex<Vec<Arc<Mutex<Option<crate::tao::structs::Window>>>>>>,
+  #[allow(clippy::arc_with_non_send_sync)]
+  live_webviews: Arc<Mutex<Vec<Arc<Mutex<Option<crate::wry::structs::WebView>>>>>>,
   exit_requested: Arc<Mutex<bool>>,
 }
 
@@ -283,6 +292,10 @@ impl Application {
       handler: Arc::new(Mutex::new(None)),
       #[allow(clippy::arc_with_non_send_sync)]
       windows_to_create: Arc::new(Mutex::new(Vec::new())),
+      #[allow(clippy::arc_with_non_send_sync)]
+      live_windows: Arc::new(Mutex::new(Vec::new())),
+      #[allow(clippy::arc_with_non_send_sync)]
+      live_webviews: Arc::new(Mutex::new(Vec::new())),
       exit_requested: Arc::new(Mutex::new(false)),
     }
   }
@@ -396,6 +409,10 @@ impl Application {
         });
         drop(handle);
 
+        // Retain a strong reference so the native window survives even if the
+        // JS BrowserWindow wrapper is later garbage-collected by the runtime.
+        self.live_windows.lock().unwrap().push(win_handle.clone());
+
         // Create pending webviews for this window
         let mut pending_webviews = webviews_to_create.lock().unwrap();
         for (webview_opts, webview_handle, ipc_listeners, pending_actions) in
@@ -469,6 +486,10 @@ impl Application {
               let mut wv_handle = webview_handle.lock().unwrap();
               *wv_handle = Some(webview);
 
+              // Retain a strong reference so the native webview survives even if the
+              // JS Webview wrapper is later garbage-collected by the runtime.
+              self.live_webviews.lock().unwrap().push(webview_handle.clone());
+
               // Apply any pending actions that were called before the webview was initialized
               if let Some(wv) = wv_handle.as_ref() {
                 apply_pending_actions(wv, &pending_actions);
@@ -537,6 +558,8 @@ impl Application {
       event_loop_proxy: self.event_loop_proxy.clone(),
       handler: self.handler.clone(),
       windows_to_create: self.windows_to_create.clone(),
+      live_windows: self.live_windows.clone(),
+      live_webviews: self.live_webviews.clone(),
       exit_requested: self.exit_requested.clone(),
     }
   }

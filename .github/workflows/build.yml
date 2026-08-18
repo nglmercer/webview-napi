@@ -223,11 +223,36 @@ jobs:
         run: ${{ matrix.settings.build_script || format('bun run build --platform --target {0} --release', matrix.settings.target) }}
         shell: bash
 
+      # The out-of-process UI host is a plain desktop binary; Android has no
+      # webview-host target.
+      - name: Build UI host
+        if: ${{ !contains(matrix.settings.target, 'android') }}
+        run: |
+          cargo build -p webview-host --release --target ${{ matrix.settings.target }}
+          mkdir -p host-dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/${{ matrix.settings.target }}/release/webview-host.exe \
+               host-dist/webview-host-${{ matrix.settings.target }}.exe
+          else
+            cp target/${{ matrix.settings.target }}/release/webview-host \
+               host-dist/webview-host-${{ matrix.settings.target }}
+          fi
+        shell: bash
+        env:
+          PKG_CONFIG_ALLOW_CROSS: '1'
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
+
+      - name: Upload UI host artifact
+        if: ${{ !contains(matrix.settings.target, 'android') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: webview-host-${{ matrix.settings.target }}
+          path: host-dist/*
           if-no-files-found: error
           retention-days: 7
 

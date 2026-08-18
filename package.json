@@ -1,9 +1,22 @@
 {
   "name": "webview-napi",
-  "version": "0.1.9",
+  "version": "0.2.1",
   "description": "Robust cross-platform webview library for Node.js written in Rust. It also works with deno and bun.",
   "main": "./index.js",
   "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs"
+    },
+    "./runtime": {
+      "types": "./runtime.d.ts",
+      "import": "./runtime.js",
+      "require": "./runtime.cjs"
+    },
+    "./package.json": "./package.json"
+  },
   "repository": "https://github.com/nglmercer/webview-napi",
   "license": "MIT",
   "type": "module",
@@ -19,6 +32,11 @@
     "index.d.ts",
     "index.js",
     "index.cjs",
+    "runtime.js",
+    "runtime.cjs",
+    "runtime.d.ts",
+    "webview-host*",
+    "bin/webview-host*",
     "*.node"
   ],
   "napi": {
@@ -64,7 +82,9 @@
     "clippy": "cargo clippy -- -D warnings",
     "docs": "cargo doc --no-deps --open",
     "update": "bun update",
-    "setup": "bash ./scripts/install-linux-deps.sh"
+    "setup": "bash ./scripts/install-linux-deps.sh",
+    "build:host": "cargo build -p webview-host --release",
+    "build:host:debug": "cargo build -p webview-host"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.1",

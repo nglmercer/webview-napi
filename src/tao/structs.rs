@@ -555,6 +555,23 @@ pub struct EventLoopWindowTarget {
   inner: Option<tao::event_loop::EventLoopWindowTarget<()>>,
 }
 
+/// Converts a native `WindowId` into a stable numeric id usable from JS.
+///
+/// `tao::window::WindowId` is opaque and neither numeric nor hashable across
+/// platforms in a uniform way, so we reinterpret its bytes. The value is only
+/// meaningful for the lifetime of the window it identifies.
+pub(crate) fn window_id_to_u64(id: tao::window::WindowId) -> u64 {
+  let mut value: u64 = 0;
+  unsafe {
+    std::ptr::copy_nonoverlapping(
+      &id as *const _ as *const u8,
+      &mut value as *mut _ as *mut u8,
+      std::mem::size_of_val(&id).min(8),
+    );
+  }
+  value
+}
+
 /// Window for displaying content.
 #[napi]
 pub struct Window {
@@ -574,16 +591,7 @@ impl Window {
   #[napi(getter)]
   pub fn id(&self) -> Result<u64> {
     if let Some(inner) = &self.inner {
-      let id = inner.lock().unwrap().id();
-      let mut id_val: u64 = 0;
-      unsafe {
-        std::ptr::copy_nonoverlapping(
-          &id as *const _ as *const u8,
-          &mut id_val as *mut _ as *mut u8,
-          std::mem::size_of_val(&id).min(8),
-        );
-      }
-      Ok(id_val)
+      Ok(window_id_to_u64(inner.lock().unwrap().id()))
     } else {
       Ok(0)
     }

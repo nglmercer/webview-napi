@@ -40,6 +40,7 @@ bun add webview-napi
 ### Platform-Specific Requirements
 
 **Linux:**
+
 ```bash
 # Debian/Ubuntu
 sudo apt-get install libwebkit2gtk-4.0-dev libappindicator3-dev libsoup2.4-dev
@@ -74,6 +75,93 @@ The framework consists of three main layers:
 └─────────────────────────────────────────────┘
 ```
 
+### Two runtimes, one API
+
+The native event loop and the JavaScript event loop cannot both own the main
+thread. `webview-napi` offers two ways out, behind the same TypeScript API:
+
+```
+WebviewRuntime  (import from 'webview-napi/runtime')
+      │
+      ├── EmbeddedRuntime  → N-API in-process, pumped with pollEvents()
+      │
+      └── ProcessRuntime   → `webview-host` binary, JSON-RPC over stdio
+```
+
+The **embedded** backend is the classic one: the UI lives in your process and
+the loop is pumped from the host runtime so timers, promises and I/O keep
+running.
+
+The **process** backend puts the UI in a separate Rust process that owns its tao
+event loop outright, so nothing blocks the Node/Bun loop, a UI crash no longer
+takes the backend down, and Bun/Deno get hardware GL back (the software-GL
+workaround only exists because WebKit is initialized inside a bun/deno-hosted
+addon).
+
+```typescript
+import { WebviewRuntime } from 'webview-napi/runtime';
+
+const runtime = await WebviewRuntime.start({
+  mode: 'process', // 'embedded' | 'process' | 'auto' (default)
+  exitOnLastWindowClosed: false,
+});
+
+const win = await runtime.createWindow({ title: 'App', width: 1200, height: 800 });
+const view = await win.createWebview({ url: 'http://localhost:5173' });
+
+win.on('close-requested', ({ windowId }) => console.log('closing', windowId));
+
+// Your backend keeps running.
+setInterval(() => console.log('backend alive'), 1000);
+
+await runtime.whenExit();
+```
+
+`mode: 'auto'` uses the out-of-process host when its binary is available and
+falls back to embedded otherwise. Build the host with:
+
+```bash
+bun run build:host        # cargo build -p webview-host --release
+```
+
+### Window and application lifetimes
+
+Closing a window destroys **that window only**. The application stops when it is
+told to:
+
+```
+CloseRequested
+     │
+     ├── close guard armed ──► emit close-requested, window stays alive
+     │
+     ▼
+destroy window + its webviews  ──►  emit window-destroyed
+     │
+     ▼
+exitOnLastWindowClosed && no windows left ──► exit
+```
+
+```typescript
+const app = new Application({ exitOnLastWindowClosed: false });
+
+window.close(); // this window only
+window.setCloseGuard(true); // decide in JS whether a close request is honoured
+app.exit(); // stop the event loop
+```
+
+### Embedded pumping
+
+`app.run()` takes over the calling thread — fine for a UI-only program. To keep
+Node/Bun responsive, pump instead:
+
+```typescript
+const status = app.pollEvents(); // { windowCount, hasWindows, exitRequested }
+```
+
+`runIteration()` still exists as a deprecated alias returning
+`!status.exitRequested`. The `WebviewRuntime` embedded backend drives this loop
+for you.
+
 ---
 
 ## 📖 Basic Usage
@@ -86,14 +174,14 @@ The `Application` class provides a high-level wrapper to get started quickly.
 import { Application, ControlFlow } from 'webview-napi';
 
 const app = new Application({
-  controlFlow: ControlFlow.Poll
+  controlFlow: ControlFlow.Poll,
 });
 
 const window = app.createBrowserWindow({
-  title: "My Desktop App",
+  title: 'My Desktop App',
   width: 800,
   height: 600,
-  visible: true
+  visible: true,
 });
 
 app.run();
@@ -107,14 +195,9 @@ For more control, use the `EventLoop`, `WindowBuilder`, and `WebViewBuilder`.
 import { EventLoop, WindowBuilder, WebViewBuilder } from 'webview-napi';
 
 const eventLoop = new EventLoop();
-const window = new WindowBuilder()
-  .withTitle("Advanced Window")
-  .withInnerSize(1024, 768)
-  .build(eventLoop);
+const window = new WindowBuilder().withTitle('Advanced Window').withInnerSize(1024, 768).build(eventLoop);
 
-const webview = new WebViewBuilder()
-  .withUrl("https://github.com")
-  .buildOnWindow(window, "main-view");
+const webview = new WebViewBuilder().withUrl('https://github.com').buildOnWindow(window, 'main-view');
 
 eventLoop.run();
 ```
@@ -129,11 +212,11 @@ Communicate between your Node.js logic and the JavaScript running inside the Web
 
 ```typescript
 webview.on((err, message) => {
-  console.log("Received from Webview:", message);
+  console.log('Received from Webview:', message);
 });
 
 // Send message to Webview
-webview.send("Hello from Node!");
+webview.send('Hello from Node!');
 ```
 
 ### Webview side (Frontend)
@@ -143,11 +226,11 @@ The framework injects a global handler:
 ```javascript
 // Listen for messages from Node
 window.__webview_on_message__ = (message) => {
-  console.log("Message from Node:", message);
+  console.log('Message from Node:', message);
 };
 
 // Send to Node
-window.ipc.postMessage("Data from Frontend");
+window.ipc.postMessage('Data from Frontend');
 ```
 
 ---
@@ -172,14 +255,19 @@ renderer.render(win, pixelBuffer);
 
 Check the [`examples/`](examples/) directory for complete working examples:
 
-| Example | Description |
-|---------|-------------|
-| [`basic-window-example.ts`](examples/basic-window-example.ts) | Basic window creation |
-| [`basic-webview-example.ts`](examples/basic-webview-example.ts) | Simple webview with URL |
-| [`ipc-example.ts`](examples/ipc-example.ts) | IPC communication |
-| [`html.ts`](examples/html.ts) | Render custom HTML |
-| [`transparency.ts`](examples/transparency.ts) | Transparent window |
-| [`multi-webview.ts`](examples/multi-webview.ts) | Multiple webviews |
+| Example                                                                         | Description                              |
+| ------------------------------------------------------------------------------- | ---------------------------------------- |
+| [`basic-window-example.ts`](examples/basic-window-example.ts)                   | Basic window creation                    |
+| [`basic-webview-example.ts`](examples/basic-webview-example.ts)                 | Simple webview with URL                  |
+| [`ipc-example.ts`](examples/ipc-example.ts)                                     | IPC communication                        |
+| [`html.ts`](examples/html.ts)                                                   | Render custom HTML                       |
+| [`transparency.ts`](examples/transparency.ts)                                   | Transparent window                       |
+| [`multi-webview.ts`](examples/multi-webview.ts)                                 | Multiple webviews                        |
+| [`multiple.ts`](examples/multiple.ts)                                           | Two windows with independent lifetimes   |
+| [`close-example.ts`](examples/close-example.ts)                                 | Close guards and window destruction      |
+| [`two-windows-independent-close.ts`](examples/two-windows-independent-close.ts) | An application that outlives its windows |
+| [`runtime-embedded.ts`](examples/runtime-embedded.ts)                           | `WebviewRuntime`, embedded backend       |
+| [`runtime-process.ts`](examples/runtime-process.ts)                             | `WebviewRuntime`, out-of-process host    |
 
 ---
 
@@ -187,13 +275,14 @@ Check the [`examples/`](examples/) directory for complete working examples:
 
 ### Core Classes
 
-| Class | Description |
-|-------|-------------|
-| `Application` | High-level entry point for window/app management |
-| `EventLoop` | Manages the system event queue and window lifecycle |
-| `Window` | Controls native window properties (title, size, decorations) |
-| `WebView` | The browser engine component (loads URLs, HTML, IPC) |
-| `PixelRenderer` | Tool for rendering raw RGBA buffers to a window |
+| Class            | Description                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| `Application`    | High-level entry point for window/app management                                     |
+| `EventLoop`      | Manages the system event queue and window lifecycle                                  |
+| `Window`         | Controls native window properties (title, size, decorations)                         |
+| `WebView`        | The browser engine component (loads URLs, HTML, IPC)                                 |
+| `PixelRenderer`  | Tool for rendering raw RGBA buffers to a window                                      |
+| `WebviewRuntime` | Promise-based facade over the embedded and process backends (`webview-napi/runtime`) |
 
 ### Key Utilities
 
@@ -209,7 +298,7 @@ Check the [`examples/`](examples/) directory for complete working examples:
 
 ```typescript
 const window = new WindowBuilder()
-  .withTitle("My App")
+  .withTitle('My App')
   .withInnerSize(1024, 768)
   .withPosition(100, 100)
   .withResizable(true)
@@ -223,10 +312,10 @@ const window = new WindowBuilder()
 
 ```typescript
 const webview = new WebViewBuilder()
-  .withUrl("https://example.com")
+  .withUrl('https://example.com')
   .withTransparent(false)
   .withIncognito(false)
-  .build(eventLoop, "webview-id");
+  .build(eventLoop, 'webview-id');
 ```
 
 ---
@@ -235,19 +324,20 @@ const webview = new WebViewBuilder()
 
 On Linux the module uses the GTK3 / `webkit2gtk-4.1` stack. When it detects a
 non-Node N-API runtime (bun/deno) it forces **software GL** (`LIBGL_ALWAYS_SOFTWARE=1`
-+ `GALLIUM_DRIVER=llvmpipe`) to avoid a Mesa hardware-GL crash (`driCreateNewScreen3`)
-that affects those runtimes. This is backend-agnostic, so **native Wayland works** — the
-module lets GTK auto-detect Wayland and does not force the X11 backend.
+
+- `GALLIUM_DRIVER=llvmpipe`) to avoid a Mesa hardware-GL crash (`driCreateNewScreen3`)
+  that affects those runtimes. This is backend-agnostic, so **native Wayland works** — the
+  module lets GTK auto-detect Wayland and does not force the X11 backend.
 
 ### Environment variables
 
-| Variable | Effect |
-|----------|--------|
-| `GDK_BACKEND` | Set to `wayland` or `x11` to pin the backend. Always respected and never overridden. |
-| `WEBVIEW_NAPI_PREFER_X11` | If set, forces `GDK_BACKEND=x11` (runs under XWayland) instead of native Wayland. |
-| `LIBGL_ALWAYS_SOFTWARE` | Forced to `1` under bun/deno (unless already set) to avoid the Mesa crash. |
-| `GALLIUM_DRIVER` | Forced to `llvmpipe` under bun/deno (unless already set). |
-| `WEBKIT_DISABLE_DMABUF_RENDERER` | Set to `1`; a no-op on GTK3 but required on a future GTK4 build. |
+| Variable                         | Effect                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `GDK_BACKEND`                    | Set to `wayland` or `x11` to pin the backend. Always respected and never overridden. |
+| `WEBVIEW_NAPI_PREFER_X11`        | If set, forces `GDK_BACKEND=x11` (runs under XWayland) instead of native Wayland.    |
+| `LIBGL_ALWAYS_SOFTWARE`          | Forced to `1` under bun/deno (unless already set) to avoid the Mesa crash.           |
+| `GALLIUM_DRIVER`                 | Forced to `llvmpipe` under bun/deno (unless already set).                            |
+| `WEBKIT_DISABLE_DMABUF_RENDERER` | Set to `1`; a no-op on GTK3 but required on a future GTK4 build.                     |
 
 ### Known limitations on Wayland
 

@@ -1,86 +1,64 @@
-import { Application, WebviewApplicationEvent } from '../index.js'
+/**
+ * Window close semantics.
+ *
+ * Closing a window destroys that window only. The application exits when its
+ * policy says so — here `exitOnLastWindowClosed` is left at its default (true),
+ * so the app ends once the last window is gone.
+ *
+ * The window also arms a close guard, which turns the user's close request into
+ * a plain event: nothing is destroyed until we call `window.close()` ourselves.
+ */
+import { Application, WebviewApplicationEvent } from '../index.js';
 
 const app = new Application();
 
-// Create a browser window with a webview
 const browserWindow = app.createBrowserWindow({
   title: 'Close Example',
   width: 800,
   height: 600,
 });
 
-const webview = browserWindow.createWebview({
+browserWindow.createWebview({
   html: `
     <!DOCTYPE html>
     <html>
-    <head>
-      <title>Close Example</title>
-      <style>
-        body {
-          font-family: Arial, sans-serif;
-          padding: 20px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-        button {
-          padding: 10px 20px;
-          font-size: 16px;
-          cursor: pointer;
-        }
-      </style>
-    </head>
-    <body>
-      <h1>Close Example</h1>
-      <p>This example demonstrates how to close the application gracefully.</p>
-        <button onclick="closeApp()">Close Application</button>
-        <button onclick="reloadWebview()">Reload Webview</button>
-        <script>
-          function closeApp() {
-            // This triggers a browser-level close which the event loop
-            // detects as a WindowCloseRequested event
-            window.close();
-          }
-          
-          function reloadWebview() {
-            // This will reload the webview
-            location.reload();
-          }
-        </script>
-    </body>
+      <body style="font-family: system-ui; padding: 24px">
+        <h1>Close Example</h1>
+        <p>Closing this window asks JavaScript first.</p>
+        <button onclick="window.ipc.postMessage('confirm-close')">Close window</button>
+      </body>
     </html>
   `,
 });
 
-// Set up event handler for application events
-// You can use either onEvent() or bind() - they are equivalent
-app.bind((_e, event) => {
-  console.log('Application event:', event.event);
+// Ask before closing: with the guard armed, a close request only notifies us.
+browserWindow.setCloseGuard(true);
+
+let confirmed = false;
+
+app.bind((err, event) => {
+  if (err) return;
 
   if (event.event === WebviewApplicationEvent.WindowCloseRequested) {
-    console.log('Window close requested');
-    // You can perform cleanup here before the window closes
-    // For example: save data, close connections, etc.
+    console.log(`close requested for window ${event.windowId}`);
+    if (confirmed) {
+      browserWindow.close();
+    } else {
+      console.log('first request ignored — click again (or press the button) to close');
+      confirmed = true;
+    }
+  }
+
+  if (event.event === WebviewApplicationEvent.WindowDestroyed) {
+    console.log(`window ${event.windowId} destroyed`);
+  }
+
+  if (event.event === WebviewApplicationEvent.ApplicationExit) {
+    console.log('application exiting');
   }
 });
 
-// Example: Programmatically close the application after 5 seconds
-// setTimeout(() => {
-//   console.log('Closing application programmatically...');
-//   app.exit();
-// }, 5000);
+// `app.exit()` stops the event loop regardless of how many windows are open.
+// setTimeout(() => app.exit(), 5000)
 
-// Example: Programmatically hide the window
-// setTimeout(() => {
-//   console.log('Hiding window...');
-//   browserWindow.setVisible(false);
-// }, 3000);
-
-// Example: Programmatically show the window
-// setTimeout(() => {
-//   console.log('Showing window...');
-//   browserWindow.setVisible(true);
-// }, 4000);
-
-// Run the application
 app.run();

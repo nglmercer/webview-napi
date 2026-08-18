@@ -4,14 +4,69 @@ export declare class Application {
   constructor(options?: ApplicationOptions | undefined | null)
   onEvent(handler?: (((err: Error | null, arg: ApplicationEvent) => any)) | undefined | null): void
   bind(handler?: (((err: Error | null, arg: ApplicationEvent) => any)) | undefined | null): void
+  /** Whether the event loop terminates once the last window is destroyed. */
+  get exitOnLastWindowClosed(): boolean
+  set exitOnLastWindowClosed(value: boolean)
+  /** Hint for the JS pump driver: keep the host runtime alive while running. */
+  get keepAlive(): boolean
+  set keepAlive(value: boolean)
+  /** Number of live (created and not yet destroyed) windows. */
+  get windowCount(): number
   createBrowserWindow(options?: BrowserWindowOptions | undefined | null): BrowserWindow
-  exit(): void
+  /**
+   * Requests the application to stop its event loop.
+   *
+   * This is independent from closing windows: closing every window only ends
+   * the application when `exitOnLastWindowClosed` is enabled.
+   */
+  exit(code?: number | undefined | null): void
+  /**
+   * Runs the event loop, taking over the calling thread until the application
+   * exits. Use `pollEvents()` instead when the host runtime (Node/Bun/Deno)
+   * needs to keep servicing its own event loop.
+   */
   run(): void
+  /**
+   * Pumps the event loop once and returns control to the host runtime.
+   *
+   * Closing a window no longer terminates the application: inspect the
+   * returned status to decide when to stop pumping.
+   */
+  pollEvents(): ApplicationStatus
+  /**
+   * Deprecated: use `pollEvents()`.
+   *
+   * Returns `false` once the application has been asked to exit. Note that,
+   * unlike previous versions, closing a window does not by itself stop the
+   * application unless `exitOnLastWindowClosed` is enabled.
+   */
   runIteration(): boolean
 }
 
 export declare class BrowserWindow {
-  get id(): string
+  /**
+   * Native identifier of the window, or `null` until the window has actually
+   * been created by the event loop (i.e. after the first pump).
+   */
+  get id(): number | null
+  /** Whether the native window exists. */
+  get isCreated(): boolean
+  /**
+   * Destroys this window and every webview attached to it. The application
+   * keeps running unless `exitOnLastWindowClosed` is enabled and this was the
+   * last window.
+   */
+  close(): void
+  /**
+   * When enabled, a user close request only emits `WindowCloseRequested` and
+   * leaves the window alive; call `close()` to actually destroy it.
+   *
+   * This is the synchronous equivalent of `preventDefault()`: a JS handler
+   * cannot answer from inside the native event callback, so the decision has
+   * to be armed up front.
+   */
+  setCloseGuard(enabled: boolean): void
+  get closeGuard(): boolean
   createWebview(options?: WebviewOptions | undefined | null): Webview
   get isChild(): boolean
   isFocused(): boolean
@@ -433,12 +488,40 @@ export declare class WindowBuilder {
 
 export interface ApplicationEvent {
   event: WebviewApplicationEvent
+  /**
+   * Identifier of the window this event refers to, for window-scoped events.
+   * `null` for application-level events.
+   */
+  windowId?: number
 }
 
 export interface ApplicationOptions {
   controlFlow?: ControlFlow
+  /** Milliseconds used by `ControlFlow::WaitUntil`. Defaults to 16. */
   waitTime?: number
   exitCode?: number
+  /**
+   * Terminate the event loop once the last window has been destroyed.
+   * Defaults to `true`, matching the pre-0.3 behaviour.
+   */
+  exitOnLastWindowClosed?: boolean
+  /**
+   * Hint for the JS pump driver: keep the host runtime (Node/Bun/Deno) alive
+   * while the application is running. Defaults to `false`.
+   */
+  keepAlive?: boolean
+}
+
+/** Result of a single `Application.pollEvents()` pump. */
+export interface ApplicationStatus {
+  /** Number of live windows. */
+  windowCount: number
+  hasWindows: boolean
+  /**
+   * Whether the application has been asked to stop (`exit()`, or the
+   * `exitOnLastWindowClosed` policy kicking in).
+   */
+  exitRequested: boolean
 }
 
 /**
@@ -493,7 +576,9 @@ export declare const enum ControlFlow {
   Poll = 0,
   WaitUntil = 1,
   Exit = 2,
-  ExitWithCode = 3
+  ExitWithCode = 3,
+  /** Block until the next event arrives. This is the default. */
+  Wait = 4
 }
 
 /** Cookie information struct. */
@@ -1463,7 +1548,11 @@ export interface VideoMode {
 
 export declare const enum WebviewApplicationEvent {
   WindowCloseRequested = 0,
-  ApplicationCloseRequested = 1
+  ApplicationCloseRequested = 1,
+  /** A window and all of its webviews have been destroyed. */
+  WindowDestroyed = 2,
+  /** The event loop is about to terminate. */
+  ApplicationExit = 3
 }
 
 /** Attributes for creating a webview. */

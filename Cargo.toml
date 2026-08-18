@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/webview-host"]
+resolver = "2"
+
 [package]
 authors = ["LongYinan <lynweklm@gmail.com>"]
 edition = "2021"

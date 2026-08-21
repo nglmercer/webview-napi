@@ -345,7 +345,7 @@ impl PixelRenderer {
     );
 
     // Clear with background color first
-    for pixel in frame.chunks_exact_mut(4) {
+    for pixel in frame.as_chunks_mut::<4>().0 {
       pixel.copy_from_slice(&self.bg_color);
     }
 

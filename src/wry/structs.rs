@@ -726,7 +726,7 @@ impl WebViewBuilder {
       // IPC Handler
       let (webview_builder_with_ipc, listeners) = setup_ipc_handler(
         self.ipc_handler.take(),
-        self.ipc_handlers.drain(..).collect(),
+        std::mem::take(&mut self.ipc_handlers),
         webview_builder,
         ipc_listeners_override,
       );
@@ -764,7 +764,7 @@ impl WebViewBuilder {
       // IPC Handler
       let (webview_builder_with_ipc, listeners) = setup_ipc_handler(
         self.ipc_handler.take(),
-        self.ipc_handlers.drain(..).collect(),
+        std::mem::take(&mut self.ipc_handlers),
         webview_builder,
         ipc_listeners_override,
       );
@@ -949,7 +949,7 @@ impl WebViewBuilder {
       // IPC Handler
       let (webview_builder_with_ipc, listeners) = setup_ipc_handler(
         self.ipc_handler.take(),
-        self.ipc_handlers.drain(..).collect(),
+        std::mem::take(&mut self.ipc_handlers),
         webview_builder,
         ipc_listeners_override,
       );
@@ -987,7 +987,7 @@ impl WebViewBuilder {
       // IPC Handler
       let (webview_builder_with_ipc, listeners) = setup_ipc_handler(
         self.ipc_handler.take(),
-        self.ipc_handlers.drain(..).collect(),
+        std::mem::take(&mut self.ipc_handlers),
         webview_builder,
         ipc_listeners_override,
       );

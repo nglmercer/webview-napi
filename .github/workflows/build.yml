@@ -129,7 +129,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.5
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -154,9 +154,12 @@ jobs:
           path: |
             ~/.bun/install/cache
             node_modules
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb', '**/package-lock.json') }}
+          # Include the target so matrix jobs no longer race to save/restore a
+          # single shared key; hash the committed bun.lock (package-lock.json /
+          # bun.lockb are absent, so hashing them produced an empty key).
+          key: ${{ runner.os }}-${{ matrix.settings.target }}-bun-${{ hashFiles('bun.lock') }}
           restore-keys: |
-            ${{ runner.os }}-bun-
+            ${{ runner.os }}-${{ matrix.settings.target }}-bun-
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -165,7 +168,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ matrix.settings.target }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.settings.target }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ matrix.settings.target }}-cargo-registry-
 
@@ -177,16 +180,33 @@ jobs:
           restore-keys: |
             ${{ matrix.settings.os }}-${{ matrix.settings.target }}-cargo-build-
 
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config
-
+      # No generic apt-get step here: the two steps below know which matrix
+      # targets actually need Linux system packages, so Android jobs no longer
+      # waste a mirror request on pkg-config/GTK.
       - name: Install system dependencies (Linux x86_64)
         if: runner.os == 'Linux' && matrix.settings.sys_deps
+        shell: bash
         run: |
-          sudo apt-get install -y ${{ matrix.settings.sys_deps }}
+          set -euxo pipefail
+
+          # GitHub's Azure mirror has been hanging and stalling runners for an
+          # hour; fall back to the primary mirror so a sick mirror fails/retries
+          # in minutes instead of occupying a runner.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+            if ! grep -q . /etc/apt/apt-mirrors.txt; then
+              echo "https://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+            fi
+          fi
+
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            update
+
+          sudo apt-get install -y --no-install-recommends \
+            ${{ matrix.settings.sys_deps }}
 
       - name: Install cross-compilation dependencies (Linux ARM)
         if: runner.os == 'Linux' && matrix.settings.cross_arch
@@ -203,15 +223,20 @@ jobs:
           sudo find /etc/apt/sources.list.d/ /etc/apt/ -name "*.sources" -type f -exec \
             sudo sh -c 'grep -q "Architectures:" "$1" || sed -i "/^Types: deb/a Architectures: amd64" "$1"' _ {} \;
 
-          # 2. Add the Ports repository for the cross-architecture
+          # 2. Add the Ports repository for the cross-architecture (HTTPS)
           CODENAME=$(lsb_release -sc)
-          echo "deb [arch=${{ matrix.settings.cross_arch }}] http://ports.ubuntu.com/ubuntu-ports $CODENAME main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports.list
-          echo "deb [arch=${{ matrix.settings.cross_arch }}] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/ports.list
-          echo "deb [arch=${{ matrix.settings.cross_arch }}] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/ports.list
+          echo "deb [arch=${{ matrix.settings.cross_arch }}] https://ports.ubuntu.com/ubuntu-ports $CODENAME main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports.list
+          echo "deb [arch=${{ matrix.settings.cross_arch }}] https://ports.ubuntu.com/ubuntu-ports ${CODENAME}-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/ports.list
+          echo "deb [arch=${{ matrix.settings.cross_arch }}] https://ports.ubuntu.com/ubuntu-ports ${CODENAME}-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/ports.list
 
           # 3. Update and install
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
             ${{ matrix.settings.cross_gcc }} \
             ${{ matrix.settings.cross_gpp }} \
             ${{ matrix.settings.cross_sys_deps }}
@@ -227,19 +252,41 @@ jobs:
       # webview-host target.
       - name: Build UI host
         if: ${{ !contains(matrix.settings.target, 'android') }}
+        shell: bash
         run: |
+          set -euxo pipefail
+
+          # Reconstruct the cross-compilation environment for foreign-arch
+          # Linux targets. The main Build step exports CC/CXX/linker/pkg-config
+          # only within its own shell, so that state does not survive to this
+          # step. Without it gdk-sys cannot find the target pkg-config files and
+          # the linker would default to the host toolchain.
+          if [ -n "${{ matrix.settings.cross_triplet }}" ]; then
+            triplet="${{ matrix.settings.cross_triplet }}"
+            target_env="$(echo '${{ matrix.settings.target }}' | tr '[:lower:]-' '[:upper:]_')"
+
+            export CC="${triplet}-gcc"
+            export CXX="${triplet}-g++"
+            export AR="${triplet}-ar"
+            export PKG_CONFIG_ALLOW_CROSS=1
+            export PKG_CONFIG_SYSROOT_DIR=/
+            export PKG_CONFIG_PATH="/usr/lib/${triplet}/pkgconfig:/usr/share/pkgconfig"
+            export PKG_CONFIG_LIBDIR="/usr/lib/${triplet}/pkgconfig:/usr/share/pkgconfig"
+            export "CARGO_TARGET_${target_env}_LINKER=${triplet}-gcc"
+
+            pkg-config --modversion gdk-3.0
+            pkg-config --modversion webkit2gtk-4.1
+          fi
+
           cargo build -p webview-host --release --target ${{ matrix.settings.target }}
           mkdir -p host-dist
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp target/${{ matrix.settings.target }}/release/webview-host.exe \
-               host-dist/webview-host-${{ matrix.settings.target }}.exe
+            cp "target/${{ matrix.settings.target }}/release/webview-host.exe" \
+               "host-dist/webview-host-${{ matrix.settings.target }}.exe"
           else
-            cp target/${{ matrix.settings.target }}/release/webview-host \
-               host-dist/webview-host-${{ matrix.settings.target }}
+            cp "target/${{ matrix.settings.target }}/release/webview-host" \
+               "host-dist/webview-host-${{ matrix.settings.target }}"
           fi
-        shell: bash
-        env:
-          PKG_CONFIG_ALLOW_CROSS: '1'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

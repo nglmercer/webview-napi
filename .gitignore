@@ -117,7 +117,6 @@ dist
 #Added by cargo
 
 /target
-Cargo.lock
 
 *.node
 .pnp.*
@@ -145,7 +144,6 @@ bun.lockb
 
 # Rust
 .cargo-cache/
-Cargo.lock
 
 # NAPI
 index.d.ts
@@ -157,4 +155,3 @@ npm/
 *.swo
 *~
 .DS_Store
-bun.lock

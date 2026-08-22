@@ -527,47 +527,163 @@ function requireNative() {
   }
 }
 
-nativeBinding = requireNative()
+function createLoadErrorChain(errors) {
+  return errors.reduce((previous, current) => {
+    let message
+    try {
+      message =
+        current && typeof current.message === 'string'
+          ? current.message
+          : String(current)
+    } catch {
+      message = 'Unknown error'
+    }
+    const error = new Error(message)
+    error.cause = previous
+    return error
+  }, null)
+}
 
 // NAPI_RS_FORCE_WASI is a tri-state flag:
 //   unset / any other value → native binding preferred, WASI is only a fallback
-//   'true'                   → force WASI fallback even if native loaded
-//   'error'                  → force WASI and throw if no WASI binding is found
+//   'true'                   → prefer WASI, but retain native as a lazy fallback
+//   'error'                  → require WASI without initializing a native fallback
 // Treating any non-empty string as truthy (the historical behavior) meant
 // NAPI_RS_FORCE_WASI=false, NAPI_RS_FORCE_WASI=0, etc. inadvertently triggered
 // the WASI path, causing ENOENT for packages shipped without a .wasi.cjs file.
+//
+// NAPI_RS_WASI_FLAVOR selects one exact generated flavor and implies strict
+// WASI loading. It never crosses into another flavor or falls back to native.
+const __napiWasiFlavors = ["wasm32-wasi"]
+const __napiWasiFlavor = process.env.NAPI_RS_WASI_FLAVOR
+const __napiWasiFlavorRequested =
+  typeof __napiWasiFlavor === 'string' && __napiWasiFlavor.length > 0
+if (
+  __napiWasiFlavorRequested &&
+  __napiWasiFlavors.indexOf(__napiWasiFlavor) === -1
+) {
+  throw new Error(
+    'Unsupported WASI flavor "' +
+      __napiWasiFlavor +
+      '". Available flavors: ' +
+      __napiWasiFlavors.join(', '),
+  )
+}
+const forceWasiError = process.env.NAPI_RS_FORCE_WASI === 'error'
 const forceWasi =
-  process.env.NAPI_RS_FORCE_WASI === 'true' || process.env.NAPI_RS_FORCE_WASI === 'error'
+  process.env.NAPI_RS_FORCE_WASI === 'true' ||
+  forceWasiError ||
+  __napiWasiFlavorRequested
+
+if (!forceWasi) {
+  nativeBinding = requireNative()
+}
 
 if (!nativeBinding || forceWasi) {
   let wasiBinding = null
-  let wasiBindingError = null
-  try {
-    wasiBinding = require('./webview-napi.wasi.cjs')
-    nativeBinding = wasiBinding
-  } catch (err) {
-    if (forceWasi) {
-      wasiBindingError = err
-    }
-  }
-  if (!nativeBinding || forceWasi) {
+  let wasiBindingLoaded = false
+  const wasiBindingErrors = []
+  const __napiWasiResolveCandidate = (specifier, isPackage, localArtifacts) => {
     try {
-      wasiBinding = require('webview-napi-wasm32-wasi')
-      nativeBinding = wasiBinding
-    } catch (err) {
-      if (forceWasi) {
-        if (!wasiBindingError) {
-          wasiBindingError = err
-        } else {
-          wasiBindingError.cause = err
-        }
-        loadErrors.push(err)
+      require.resolve(specifier)
+    } catch (resolveError) {
+      if (!resolveError || resolveError.code !== 'MODULE_NOT_FOUND') {
+        throw resolveError
       }
+      if (isPackage) {
+        try {
+          require.resolve(specifier + '/package.json')
+        } catch (packageError) {
+          if (packageError && packageError.code === 'MODULE_NOT_FOUND') {
+            return resolveError
+          }
+          // An exports restriction proves the package exists even when its
+          // package.json is not public. Preserve the root resolution failure.
+          throw resolveError
+        }
+        // The package exists but its main/export target is broken.
+        throw resolveError
+      }
+      return resolveError
+    }
+    if (localArtifacts) {
+      let artifactError = null
+      for (let i = 0; i < localArtifacts.length; i++) {
+        try {
+          require.resolve(localArtifacts[i])
+          return null
+        } catch (resolveError) {
+          if (!resolveError || resolveError.code !== 'MODULE_NOT_FOUND') {
+            throw resolveError
+          }
+          artifactError = resolveError
+        }
+      }
+      return artifactError
+    }
+    return null
+  }
+  if (!wasiBindingLoaded && (!__napiWasiFlavorRequested || __napiWasiFlavor === "wasm32-wasi")) {
+    let candidateError = null
+    let candidateFailed = false
+    try {
+      candidateError = __napiWasiResolveCandidate('./webview-napi.wasi.cjs', false, ["./webview-napi.wasm32-wasi.debug.wasm","./webview-napi.wasm32-wasi.wasm"])
+      candidateFailed = candidateError !== null
+      if (!candidateFailed) {
+        wasiBinding = require('./webview-napi.wasi.cjs')
+        nativeBinding = wasiBinding
+        wasiBindingLoaded = true
+      }
+    } catch (err) {
+      candidateError = err
+      candidateFailed = true
+    }
+    if (candidateFailed) {
+      wasiBindingErrors.push(candidateError)
+      loadErrors.push(candidateError)
     }
   }
-  if (process.env.NAPI_RS_FORCE_WASI === 'error' && !wasiBinding) {
-    const error = new Error('WASI binding not found and NAPI_RS_FORCE_WASI is set to error')
-    error.cause = wasiBindingError
+  if (!wasiBindingLoaded && (!__napiWasiFlavorRequested || __napiWasiFlavor === "wasm32-wasi")) {
+    let candidateError = null
+    let candidateFailed = false
+    try {
+      candidateError = __napiWasiResolveCandidate('webview-napi-wasm32-wasi', true, undefined)
+      candidateFailed = candidateError !== null
+      if (!candidateFailed) {
+        if (process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          const bindingPackageVersion = require('webview-napi-wasm32-wasi/package.json').version
+          if (bindingPackageVersion !== '2.1.0') {
+            throw new Error(`WASI binding package version mismatch, expected 2.1.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+        }
+        wasiBinding = require('webview-napi-wasm32-wasi')
+        nativeBinding = wasiBinding
+        wasiBindingLoaded = true
+      }
+    } catch (err) {
+      candidateError = err
+      candidateFailed = true
+    }
+    if (candidateFailed) {
+      wasiBindingErrors.push(candidateError)
+      loadErrors.push(candidateError)
+    }
+  }
+  if (
+    !wasiBindingLoaded &&
+    forceWasi &&
+    !forceWasiError &&
+    !__napiWasiFlavorRequested
+  ) {
+    nativeBinding = requireNative()
+  }
+  if ((forceWasiError || __napiWasiFlavorRequested) && !wasiBindingLoaded) {
+    const error = new Error(
+      __napiWasiFlavorRequested
+        ? 'WASI binding for flavor "' + __napiWasiFlavor + '" not found'
+        : 'WASI binding not found and NAPI_RS_FORCE_WASI is set to error',
+    )
+    error.cause = createLoadErrorChain(wasiBindingErrors)
     throw error
   }
 }
@@ -581,64 +697,61 @@ if (!nativeBinding) {
     )
     // assign instead of the `new Error(message, { cause })` options form,
     // which Node < 16.9 silently ignores
-    error.cause = loadErrors.reduce((err, cur) => {
-      cur.cause = err
-      return cur
-    })
+    error.cause = createLoadErrorChain(loadErrors)
     throw error
   }
   throw new Error(`Failed to load native binding`)
 }
 
-module.exports = nativeBinding
-module.exports.Application = nativeBinding.Application
-module.exports.BrowserWindow = nativeBinding.BrowserWindow
-module.exports.EventLoop = nativeBinding.EventLoop
-module.exports.EventLoopBuilder = nativeBinding.EventLoopBuilder
-module.exports.EventLoopProxy = nativeBinding.EventLoopProxy
-module.exports.EventLoopWindowTarget = nativeBinding.EventLoopWindowTarget
-module.exports.PixelRenderer = nativeBinding.PixelRenderer
-module.exports.WebContext = nativeBinding.WebContext
-module.exports.Webview = nativeBinding.Webview
-module.exports.WebView = nativeBinding.WebView
-module.exports.WebViewBuilder = nativeBinding.WebViewBuilder
-module.exports.Window = nativeBinding.Window
-module.exports.WindowBuilder = nativeBinding.WindowBuilder
-module.exports.availableMonitors = nativeBinding.availableMonitors
-module.exports.BackgroundThrottlingPolicy = nativeBinding.BackgroundThrottlingPolicy
-module.exports.BadIcon = nativeBinding.BadIcon
-module.exports.ControlFlow = nativeBinding.ControlFlow
-module.exports.CursorIcon = nativeBinding.CursorIcon
-module.exports.DeviceEventFilter = nativeBinding.DeviceEventFilter
-module.exports.DragDropEvent = nativeBinding.DragDropEvent
-module.exports.ElementState = nativeBinding.ElementState
-module.exports.Error = nativeBinding.Error
-module.exports.FullscreenType = nativeBinding.FullscreenType
-module.exports.getWebviewVersion = nativeBinding.getWebviewVersion
-module.exports.ImeState = nativeBinding.ImeState
-module.exports.Key = nativeBinding.Key
-module.exports.KeyCode = nativeBinding.KeyCode
-module.exports.KeyLocation = nativeBinding.KeyLocation
-module.exports.ModifiersState = nativeBinding.ModifiersState
-module.exports.MouseButtonState = nativeBinding.MouseButtonState
-module.exports.NewWindowResponse = nativeBinding.NewWindowResponse
-module.exports.PageLoadEvent = nativeBinding.PageLoadEvent
-module.exports.primaryMonitor = nativeBinding.primaryMonitor
-module.exports.ProgressBarStatus = nativeBinding.ProgressBarStatus
-module.exports.ProgressState = nativeBinding.ProgressState
-module.exports.renderPixels = nativeBinding.renderPixels
-module.exports.ResizeDirection = nativeBinding.ResizeDirection
-module.exports.ScaleMode = nativeBinding.ScaleMode
-module.exports.StartCause = nativeBinding.StartCause
-module.exports.TaoControlFlow = nativeBinding.TaoControlFlow
-module.exports.TaoFullscreenType = nativeBinding.TaoFullscreenType
-module.exports.TaoTheme = nativeBinding.TaoTheme
-module.exports.taoVersion = nativeBinding.taoVersion
-module.exports.Theme = nativeBinding.Theme
-module.exports.TouchPhase = nativeBinding.TouchPhase
-module.exports.UserAttentionType = nativeBinding.UserAttentionType
-module.exports.WebviewApplicationEvent = nativeBinding.WebviewApplicationEvent
-module.exports.webviewVersion = nativeBinding.webviewVersion
-module.exports.WindowEvent = nativeBinding.WindowEvent
-module.exports.WindowLevel = nativeBinding.WindowLevel
-module.exports.WryTheme = nativeBinding.WryTheme
+const { Application, BrowserWindow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget, PixelRenderer, WebContext, Webview, WebView, WebViewBuilder, Window, WindowBuilder, availableMonitors, BackgroundThrottlingPolicy, BadIcon, ControlFlow, CursorIcon, DeviceEventFilter, DragDropEvent, ElementState, Error, FullscreenType, getWebviewVersion, ImeState, Key, KeyCode, KeyLocation, ModifiersState, MouseButtonState, NewWindowResponse, PageLoadEvent, primaryMonitor, ProgressBarStatus, ProgressState, renderPixels, ResizeDirection, ScaleMode, StartCause, TaoControlFlow, TaoFullscreenType, TaoTheme, taoVersion, Theme, TouchPhase, UserAttentionType, WebviewApplicationEvent, webviewVersion, WindowEvent, WindowLevel, WryTheme } = nativeBinding
+export { Application }
+export { BrowserWindow }
+export { EventLoop }
+export { EventLoopBuilder }
+export { EventLoopProxy }
+export { EventLoopWindowTarget }
+export { PixelRenderer }
+export { WebContext }
+export { Webview }
+export { WebView }
+export { WebViewBuilder }
+export { Window }
+export { WindowBuilder }
+export { availableMonitors }
+export { BackgroundThrottlingPolicy }
+export { BadIcon }
+export { ControlFlow }
+export { CursorIcon }
+export { DeviceEventFilter }
+export { DragDropEvent }
+export { ElementState }
+export { Error }
+export { FullscreenType }
+export { getWebviewVersion }
+export { ImeState }
+export { Key }
+export { KeyCode }
+export { KeyLocation }
+export { ModifiersState }
+export { MouseButtonState }
+export { NewWindowResponse }
+export { PageLoadEvent }
+export { primaryMonitor }
+export { ProgressBarStatus }
+export { ProgressState }
+export { renderPixels }
+export { ResizeDirection }
+export { ScaleMode }
+export { StartCause }
+export { TaoControlFlow }
+export { TaoFullscreenType }
+export { TaoTheme }
+export { taoVersion }
+export { Theme }
+export { TouchPhase }
+export { UserAttentionType }
+export { WebviewApplicationEvent }
+export { webviewVersion }
+export { WindowEvent }
+export { WindowLevel }
+export { WryTheme }

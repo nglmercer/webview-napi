@@ -1,22 +1,19 @@
 /**
- * Windows outlive each other, and the application outlives its windows.
+ * An application that outlives its windows.
  *
- * `exitOnLastWindowClosed: false` keeps the event loop alive with zero windows,
- * so a backend can stay up and open a new window later. Run with:
+ * With `exitOnLastWindowClosed: false` the event loop stays up with zero
+ * windows, so a backend can keep running and open a new window later. This
+ * example reopens a window the first time it hits zero, then exits.
  *
- *   bun examples/two-windows-independent-close.ts
+ *   bun examples/application/07-app-outlives-windows.ts
  */
-import { Application, WebviewApplicationEvent } from '../index.js';
+import { Application, WebviewApplicationEvent } from '../../index.js';
 
 const app = new Application({ exitOnLastWindowClosed: false });
 
 function openWindow(title: string, x: number) {
   const win = app.createBrowserWindow({ title, width: 480, height: 360, x, y: 120 });
-  win.createWebview({
-    html: `<body style="font-family: system-ui; display:grid; place-items:center; height:100vh">
-             <h1>${title}</h1>
-           </body>`,
-  });
+  win.createWebview({ html: `<body style="font-family:system-ui; display:grid; place-items:center; height:100vh"><h1>${title}</h1></body>` });
   return win;
 }
 
@@ -27,13 +24,12 @@ let reopened = false;
 
 app.bind((err, event) => {
   if (err) return;
-  console.log(err,event)
+
   if (event.event === WebviewApplicationEvent.WindowDestroyed) {
     console.log(`window ${event.windowId} destroyed — ${app.windowCount} left`);
 
-    // The application is still alive with no windows at all: prove it by
-    // opening a fresh one the first time we hit zero.
     if (app.windowCount === 0 && !reopened) {
+      // Still alive with no windows: prove it by opening one more.
       reopened = true;
       console.log('no windows left, but the app is still running — opening one more');
       openWindow('Reopened', 360);
@@ -44,11 +40,4 @@ app.bind((err, event) => {
   }
 });
 
-const poll = () => {
-    if (app.pollEvents()) {
-        setTimeout(poll, 10);
-    } else {
-        process.exit(0);
-    }
-};
-poll();
+app.run();

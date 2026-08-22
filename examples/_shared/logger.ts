@@ -40,7 +40,7 @@ class Logger {
   /**
    * Convert BigInt values to strings for JSON serialization
    */
-  private jsonReplacer(key: string, value: any): any {
+  private jsonReplacer(_key: string, value: any): any {
     if (typeof value === 'bigint') {
       return value.toString()
     }

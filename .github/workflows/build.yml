@@ -33,7 +33,8 @@ jobs:
             target: aarch64-apple-darwin
             build_script: |
               export PKG_CONFIG_ALLOW_CROSS=1
-              bun run build --platform --target aarch64-apple-darwin --release
+              bun run build:esm -- --target aarch64-apple-darwin
+              bun run build:cjs -- --target aarch64-apple-darwin
 
           # Windows
           - os: windows-latest
@@ -79,7 +80,8 @@ jobs:
               export CXX=aarch64-linux-gnu-g++
               export AR=aarch64-linux-gnu-ar
               export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-              bun run build --platform --target aarch64-unknown-linux-gnu --release
+              bun run build:esm -- --target aarch64-unknown-linux-gnu
+              bun run build:cjs -- --target aarch64-unknown-linux-gnu
 
           # Linux ARMv7
           - os: ubuntu-22.04
@@ -112,7 +114,8 @@ jobs:
               export CXX=arm-linux-gnueabihf-g++
               export AR=arm-linux-gnueabihf-ar
               export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
-              bun run build --platform --target armv7-unknown-linux-gnueabihf --release
+              bun run build:esm -- --target armv7-unknown-linux-gnueabihf
+              bun run build:cjs -- --target armv7-unknown-linux-gnueabihf
 
           # Android
           - os: ubuntu-latest
@@ -245,8 +248,17 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build
-        run: ${{ matrix.settings.build_script || format('bun run build --platform --target {0} --release', matrix.settings.target) }}
+        if: ${{ !matrix.settings.build_script }}
         shell: bash
+        run: |
+          set -euxo pipefail
+          bun run build:esm -- --target "${{ matrix.settings.target }}"
+          bun run build:cjs -- --target "${{ matrix.settings.target }}"
+
+      - name: Build (custom cross target)
+        if: ${{ matrix.settings.build_script }}
+        shell: bash
+        run: ${{ matrix.settings.build_script }}
 
       # The out-of-process UI host is a plain desktop binary; Android has no
       # webview-host target.

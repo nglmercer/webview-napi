@@ -1,6 +1,6 @@
 {
   "name": "webview-napi",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Robust cross-platform webview library for Node.js written in Rust. It also works with deno and bun.",
   "main": "./index.js",
   "types": "./index.d.ts",
@@ -65,7 +65,9 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release --esm && napi build --platform --release --js index.cjs",
+    "build:esm": "napi build --platform --release --esm",
+    "build:cjs": "napi build --platform --release --js index.cjs",
+    "build": "bun run build:esm && bun run build:cjs",
     "build:debug": "napi build --platform --esm && napi build --platform --js index.cjs",
     "build:all": "napi build --release --esm",
     "build:prebuilds": "napi build --platform --release --strip --esm && napi build --platform --release --strip --js index.cjs",

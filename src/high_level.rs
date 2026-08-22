@@ -347,7 +347,7 @@ pub struct Application {
 #[napi]
 impl Application {
   #[napi(constructor)]
-  pub fn new(options: Option<ApplicationOptions>) -> Self {
+  pub fn new(options: Option<ApplicationOptions>) -> Result<Self> {
     // Apply GL runtime workarounds (e.g. force software GL under bun/deno)
     // before any WebKit/GTK initialization happens.
     apply_runtime_gl_workaround();
@@ -367,9 +367,11 @@ impl Application {
       keep_alive: None,
     });
 
+    crate::tao::structs::claim_event_loop()?;
+
     let event_loop = tao::event_loop::EventLoop::new();
     let event_loop_proxy = event_loop.create_proxy();
-    Self {
+    Ok(Self {
       #[allow(clippy::arc_with_non_send_sync)]
       event_loop: Arc::new(Mutex::new(Some(event_loop))),
       event_loop_proxy,
@@ -389,7 +391,7 @@ impl Application {
       exit_code: Arc::new(Mutex::new(options.exit_code.unwrap_or(0))),
       control_flow: options.control_flow,
       wait_time: options.wait_time.unwrap_or(16),
-    }
+    })
   }
 
   #[napi]

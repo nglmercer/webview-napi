@@ -359,6 +359,28 @@ pub struct EventLoop {
 pub(crate) static EVENT_LOOP_CREATED: std::sync::atomic::AtomicBool =
   std::sync::atomic::AtomicBool::new(false);
 
+/// Claim the process-wide Tao/GTK event-loop slot.
+///
+/// Tao/GTK only supports one event loop per process on Linux. Every path that
+/// constructs a native EventLoop must go through this function.
+pub(crate) fn claim_event_loop() -> Result<()> {
+  #[cfg(target_os = "linux")]
+  {
+    use std::sync::atomic::Ordering;
+
+    if EVENT_LOOP_CREATED.swap(true, Ordering::SeqCst) {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "Only one EventLoop can be created per process on Linux/GTK. \
+         Use a single Application/EventLoop instance for all windows."
+          .to_string(),
+      ));
+    }
+  }
+
+  Ok(())
+}
+
 #[napi]
 impl EventLoop {
   /// Creates a new event loop.
@@ -372,22 +394,7 @@ impl EventLoop {
       crate::high_level::apply_runtime_gl_workaround();
     }
 
-    // On Linux, GTK can only be initialized once per process.
-    // Attempting to create a second EventLoop will cause a panic with:
-    // "Failed to initialize gtk backend!: Error { domain: g-io-error-quark, code: 2,
-    //  message: \"An object is already exported for the interface org.gtk.Application\" }"
-    #[cfg(target_os = "linux")]
-    {
-      use std::sync::atomic::Ordering;
-      if EVENT_LOOP_CREATED.swap(true, Ordering::SeqCst) {
-        return Err(napi::Error::new(
-          napi::Status::GenericFailure,
-          "Only one EventLoop can be created per process on Linux/GTK. \
-           Use a single EventLoop instance for all windows instead of creating multiple."
-            .to_string(),
-        ));
-      }
-    }
+    claim_event_loop()?;
 
     let event_loop = tao::event_loop::EventLoop::new();
     let proxy = event_loop.create_proxy();
@@ -499,6 +506,8 @@ impl EventLoopBuilder {
     {
       crate::high_level::apply_runtime_gl_workaround();
     }
+
+    claim_event_loop()?;
 
     // Handle backend selection BEFORE creating the event loop
     // This ensures the environment is set up correctly before tao selects the backend

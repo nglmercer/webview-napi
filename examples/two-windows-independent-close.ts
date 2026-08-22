@@ -27,7 +27,7 @@ let reopened = false;
 
 app.bind((err, event) => {
   if (err) return;
-
+  console.log(err,event)
   if (event.event === WebviewApplicationEvent.WindowDestroyed) {
     console.log(`window ${event.windowId} destroyed — ${app.windowCount} left`);
 
@@ -44,4 +44,11 @@ app.bind((err, event) => {
   }
 });
 
-app.run();
+const poll = () => {
+    if (app.pollEvents()) {
+        setTimeout(poll, 10);
+    } else {
+        process.exit(0);
+    }
+};
+poll();

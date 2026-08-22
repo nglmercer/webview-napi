@@ -5,6 +5,9 @@ import { WindowBuilder, EventLoop, PixelRenderer, RenderOptions, ScaleMode } fro
 // GTK applications can only own the org.gtk.Application interface once at a time
 const GTK_INIT_TIMEOUT = 5000
 let gtkAvailable = false // Default to false to avoid crashes
+const gtkTestsEnabled =
+  process.platform !== 'linux' ||
+  process.env.WEBVIEW_RS_ENABLE_GTK_TESTS === '1'
 
 // Shared event loop for all tests on Linux (GTK only allows one per process)
 // This must be at module level to persist across tests
@@ -53,7 +56,7 @@ async function checkGtkAvailability(): Promise<boolean> {
     const uniqueId = `webview_rs_test_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
     process.env.G_APPLICATION_ID = uniqueId
     process.env.GDK_BACKEND = process.env.GDK_BACKEND || 'wayland,x11'
-    
+
     // Quick GTK check - just try creating an event loop
     // On Linux, this will also initialize our global EventLoop tracking
     // Store the event loop in the shared variable so tests can use it
@@ -83,7 +86,7 @@ beforeAll(async () => {
     gtkAvailable = false
     return
   }
-  
+
   // Check if DISPLAY or WAYLAND_DISPLAY is available
   const hasDisplay = process.env.DISPLAY || process.env.WAYLAND_DISPLAY
   if (!hasDisplay) {
@@ -91,7 +94,7 @@ beforeAll(async () => {
     gtkAvailable = false
     return
   }
-  
+
   // Check for D-Bus session - required for GTK on Wayland
   const hasDBus = process.env.DBUS_SESSION_BUS_ADDRESS
   if (!hasDBus) {
@@ -99,7 +102,7 @@ beforeAll(async () => {
     gtkAvailable = false
     return
   }
-  
+
   // Check if there's already a conflicting GTK application registered on D-Bus
   // This is the main cause of "An object is already exported for the interface org.gtk.Application" errors
   // Note: busctl may fail in some environments (e.g., containers), so we handle that gracefully
@@ -119,7 +122,7 @@ beforeAll(async () => {
     // We'll still try to run the GTK availability check
     console.log('Note: Could not check D-Bus status, will attempt GTK check anyway')
   }
-  
+
   // Try to detect if there's already a GTK application running that might conflict
   // This is a heuristic - if the test fails with D-Bus errors, we'll skip
   // NOTE: The checkGtkAvailability() function creates an EventLoop which can crash the process
@@ -146,142 +149,156 @@ beforeAll(async () => {
  * Stress test for render functionality
  * Tests high frame counts with large buffer sizes
  * Reproduces issue: "Maximum number of clients reached" after ~231 frames
- * 
+ *
  * NOTE: On Linux/GTK, only ONE EventLoop can be created per process.
  * This is a fundamental GTK limitation. Tests must share a single EventLoop.
  */
 describe('Render Stress Tests', () => {
-  test('should handle 250+ frames without resource exhaustion', async () => {
-    const width = 1920  // High resolution width
-    const height = 1080 // High resolution height
-    const frameCount = 5000 // More than 231 to trigger the issue
-    
-    // Create buffers (RGBA format) - ~8MB per buffer
-    const buffer = Buffer.alloc(width * height * 4)
-    
-    // Fill with gradient pattern
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4
-        buffer[idx] = (x / width) * 255     // R
-        buffer[idx + 1] = (y / height) * 255 // G
-        buffer[idx + 2] = 128                // B
-        buffer[idx + 3] = 255                // A
-      }
-    }
-    
-    // Use shared event loop on Linux, create new one on other platforms
-    const eventLoop = process.platform === 'linux' ? getOrCreateEventLoop() : new EventLoop()
-    const window = new WindowBuilder()
-      .withTitle('Render Stress Test - 250+ frames')
-      .withInnerSize(width / 2, height / 2) // Display at half resolution
-      .build(eventLoop)
-    
-    // Create pixel renderer
-    const options: RenderOptions = {
-      bufferWidth: width,
-      bufferHeight: height,
-      scaleMode: ScaleMode.Fit,
-      backgroundColor: [0, 0, 0, 255]
-    }
-    const renderer = PixelRenderer.withOptions(options)
-    
-    let renderedFrames = 0
-    let errors: Error[] = []
-    
-    // Run event loop iteration to initialize window
-    eventLoop.runIteration()
-    
-    // Render frames
-    for (let i = 0; i < frameCount; i++) {
-      try {
-        // Update buffer with frame number for visual feedback
-        const frameNumber = i + 1
-        for (let j = 0; j < 100; j++) {
-          const idx = j * 4
-          buffer[idx] = (frameNumber * 10) % 255
+  test.skipIf(!gtkTestsEnabled)(
+    'should handle 250+ frames without resource exhaustion',
+    async () => {
+      // beforeAll may additionally reject GTK because there is no display,
+      // D-Bus session, etc.
+      if (process.platform === 'linux' && !gtkAvailable) return
+
+      const width = 1920  // High resolution width
+      const height = 1080 // High resolution height
+      const frameCount = 5000 // More than 231 to trigger the issue
+
+      // Create buffers (RGBA format) - ~8MB per buffer
+      const buffer = Buffer.alloc(width * height * 4)
+
+      // Fill with gradient pattern
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4
+          buffer[idx] = (x / width) * 255     // R
+          buffer[idx + 1] = (y / height) * 255 // G
+          buffer[idx + 2] = 128                // B
+          buffer[idx + 3] = 255                // A
         }
-        
-        renderer.render(window, buffer)
-        renderedFrames++
-        
-        // Log every 50 frames
-        if (frameNumber % 50 === 0) {
-          console.log(`Frame ${frameNumber} rendered successfully, data len: ${buffer.length}`)
-        }
-        
-        // Run event loop iteration
-        eventLoop.runIteration()
-      } catch (error) {
-        errors.push(error as Error)
-        console.error(`Error at frame ${i + 1}:`, error)
-        break
       }
-    }
-    
-    // Cleanup
-    try {
-      window.close()
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-    
-    // Assertions
-    expect(errors).toHaveLength(0)
-    expect(renderedFrames).toBe(frameCount)
-  }, 90000) // 90 second timeout
-  
-  test('should handle multiple renderers without client limit error', async () => {
-    const width = 800
-    const height = 600
-    const rendererCount = 10
-    
-    // Use shared event loop on Linux, create new one on other platforms
-    const eventLoop = process.platform === 'linux' ? getOrCreateEventLoop() : new EventLoop()
-    const window = new WindowBuilder()
-      .withTitle('Multi-renderer Test')
-      .withInnerSize(width, height)
-      .build(eventLoop)
-    
-    const buffer = Buffer.alloc(width * height * 4)
-    buffer.fill(255) // White
-    
-    eventLoop.runIteration()
-    
-    const renderers: PixelRenderer[] = []
-    
-    for (let i = 0; i < rendererCount; i++) {
+
+      // Use shared event loop on Linux, create new one on other platforms
+      const eventLoop = process.platform === 'linux' ? getOrCreateEventLoop() : new EventLoop()
+      const window = new WindowBuilder()
+        .withTitle('Render Stress Test - 250+ frames')
+        .withInnerSize(width / 2, height / 2) // Display at half resolution
+        .build(eventLoop)
+
+      // Create pixel renderer
       const options: RenderOptions = {
         bufferWidth: width,
         bufferHeight: height,
         scaleMode: ScaleMode.Fit,
-        backgroundColor: [i * 20, i * 20, i * 20, 255]
+        backgroundColor: [0, 0, 0, 255]
       }
-      renderers.push(PixelRenderer.withOptions(options))
-    }
-    
-    let errors: Error[] = []
-    
-    // Render with each renderer 30 times
-    for (let r = 0; r < renderers.length; r++) {
-      for (let f = 0; f < 30; f++) {
+      const renderer = PixelRenderer.withOptions(options)
+
+      let renderedFrames = 0
+      let errors: Error[] = []
+
+      // Run event loop iteration to initialize window
+      eventLoop.runIteration()
+
+      // Render frames
+      for (let i = 0; i < frameCount; i++) {
         try {
-          renderers[r].render(window, buffer)
+          // Update buffer with frame number for visual feedback
+          const frameNumber = i + 1
+          for (let j = 0; j < 100; j++) {
+            const idx = j * 4
+            buffer[idx] = (frameNumber * 10) % 255
+          }
+
+          renderer.render(window, buffer)
+          renderedFrames++
+
+          // Log every 50 frames
+          if (frameNumber % 50 === 0) {
+            console.log(`Frame ${frameNumber} rendered successfully, data len: ${buffer.length}`)
+          }
+
+          // Run event loop iteration
           eventLoop.runIteration()
         } catch (error) {
           errors.push(error as Error)
-          console.error(`Error with renderer ${r} at frame ${f}:`, error)
+          console.error(`Error at frame ${i + 1}:`, error)
           break
         }
       }
-    }
-    
-    try {
-      window.close()
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-    
-    expect(errors).toHaveLength(0)
-  }, 30000)
+
+      // Cleanup
+      try {
+        window.close()
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+
+      // Assertions
+      expect(errors).toHaveLength(0)
+      expect(renderedFrames).toBe(frameCount)
+    },
+    90000
+  )
+
+  test.skipIf(!gtkTestsEnabled)(
+    'should handle multiple renderers without client limit error',
+    async () => {
+      if (process.platform === 'linux' && !gtkAvailable) return
+
+      const width = 800
+      const height = 600
+      const rendererCount = 10
+
+      // Use shared event loop on Linux, create new one on other platforms
+      const eventLoop = process.platform === 'linux' ? getOrCreateEventLoop() : new EventLoop()
+      const window = new WindowBuilder()
+        .withTitle('Multi-renderer Test')
+        .withInnerSize(width, height)
+        .build(eventLoop)
+
+      const buffer = Buffer.alloc(width * height * 4)
+      buffer.fill(255) // White
+
+      eventLoop.runIteration()
+
+      const renderers: PixelRenderer[] = []
+
+      for (let i = 0; i < rendererCount; i++) {
+        const options: RenderOptions = {
+          bufferWidth: width,
+          bufferHeight: height,
+          scaleMode: ScaleMode.Fit,
+          backgroundColor: [i * 20, i * 20, i * 20, 255]
+        }
+        renderers.push(PixelRenderer.withOptions(options))
+      }
+
+      let errors: Error[] = []
+
+      // Render with each renderer 30 times
+      for (let r = 0; r < renderers.length; r++) {
+        for (let f = 0; f < 30; f++) {
+          try {
+            renderers[r].render(window, buffer)
+            eventLoop.runIteration()
+          } catch (error) {
+            errors.push(error as Error)
+            console.error(`Error with renderer ${r} at frame ${f}:`, error)
+            break
+          }
+        }
+      }
+
+      try {
+        window.close()
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+
+      expect(errors).toHaveLength(0)
+    },
+    30000
+  )
 })

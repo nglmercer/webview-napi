@@ -19,9 +19,10 @@ pub fn tao_version() -> String {
 /// Returns None if an EventLoop already exists or creation fails.
 #[cfg(target_os = "linux")]
 fn try_create_event_loop() -> Option<tao::event_loop::EventLoop<()>> {
-  // If the main EventLoop was already created via the NAPI constructor,
-  // GTK is already initialized and a second creation will panic.
-  if crate::tao::structs::EVENT_LOOP_CREATED.load(std::sync::atomic::Ordering::SeqCst) {
+  crate::high_level::apply_runtime_gl_workaround();
+
+  // Atomically reserve the single GTK/Tao event loop for this process.
+  if crate::tao::structs::claim_event_loop().is_err() {
     return None;
   }
 
